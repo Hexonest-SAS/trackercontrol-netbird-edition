@@ -53,27 +53,45 @@ object NetbirdLogin {
     }
 
     /**
-     * Auth écrit netbird.cfg avant même de joindre le management : si la connexion échoue et
-     * qu'aucune configuration n'existait avant, on la supprime pour ne pas la prendre pour un
-     * enregistrement valide.
+     * Auth écrit sa configuration avant même de joindre le management. Elle travaille donc sur
+     * netbird.cfg.pending (copie de la configuration existante, pour garder les clés en cas de
+     * reconnexion), qui ne devient netbird.cfg qu'en cas de succès : un échec, ou l'app tuée
+     * en plein flux SSO, ne laisse jamais une configuration non enregistrée passer pour valide.
      */
-    private fun dropUnregisteredConfig(cfg: File, existedBefore: Boolean) {
-        if (!existedBefore && cfg.exists() && !cfg.delete())
-            Log.w(TAG, "could not delete unregistered netbird.cfg")
+    private fun preparePending(ctx: Context): Pair<File, File> {
+        val dir = netbirdDir(ctx)
+        val cfg = File(dir, "netbird.cfg")
+        val pending = File(dir, "netbird.cfg.pending")
+        pending.delete()
+        if (cfg.exists()) cfg.copyTo(pending, overwrite = true)
+        return cfg to pending
     }
 
-    private fun listener(ctx: Context, cfg: File, existedBefore: Boolean): ErrListener {
+    private fun dropPending(pending: File) {
+        if (pending.exists() && !pending.delete())
+            Log.w(TAG, "could not delete netbird.cfg.pending")
+    }
+
+    private fun loginFailed(ctx: Context, pending: File, e: Throwable) {
+        dropPending(pending)
+        Log.w(TAG, "login failed: ${e.javaClass.simpleName}")
+        toast(ctx, ctx.getString(R.string.msg_netbird_login_failed, e.message ?: e.javaClass.simpleName))
+    }
+
+    private fun listener(ctx: Context, cfg: File, pending: File): ErrListener {
         val done = AtomicBoolean(false)
         return object : ErrListener {
             override fun onError(e: Exception) {
-                if (!done.compareAndSet(false, true)) return
-                dropUnregisteredConfig(cfg, existedBefore)
-                Log.w(TAG, "login failed: ${e.javaClass.simpleName}")
-                toast(ctx, ctx.getString(R.string.msg_netbird_login_failed, e.message ?: e.javaClass.simpleName))
+                if (done.compareAndSet(false, true)) loginFailed(ctx, pending, e)
             }
 
             override fun onSuccess() {
-                if (done.compareAndSet(false, true)) onLoggedIn(ctx)
+                if (!done.compareAndSet(false, true)) return
+                if (!pending.renameTo(cfg)) {
+                    loginFailed(ctx, pending, IllegalStateException("could not save NetBird configuration"))
+                    return
+                }
+                onLoggedIn(ctx)
             }
         }
     }
@@ -83,17 +101,14 @@ object NetbirdLogin {
         val key = setupKey.trim()
         if (key.isEmpty()) return
         val url = managementUrl(ctx)
-        val cfg = File(netbirdDir(ctx), "netbird.cfg")
-        val existed = cfg.exists()
         Thread({
+            val (cfg, pending) = preparePending(ctx)
             try {
                 NetbirdEgress.ensureClient(ctx)
-                Auth(cfg.absolutePath, url, null)
-                    .loginWithSetupKeyAndSaveConfig(listener(ctx, cfg, existed), key, Build.MODEL ?: "android")
+                Auth(pending.absolutePath, url, null)
+                    .loginWithSetupKeyAndSaveConfig(listener(ctx, cfg, pending), key, Build.MODEL ?: "android")
             } catch (e: Throwable) {
-                dropUnregisteredConfig(cfg, existed)
-                Log.w(TAG, "setup key login failed: ${e.javaClass.simpleName}")
-                toast(ctx, ctx.getString(R.string.msg_netbird_login_failed, e.message ?: e.javaClass.simpleName))
+                loginFailed(ctx, pending, e)
             }
         }, "netbird-login").start()
     }
@@ -101,8 +116,6 @@ object NetbirdLogin {
     fun loginWithSso(context: Context) {
         val ctx = context.applicationContext
         val url = managementUrl(ctx)
-        val cfg = File(netbirdDir(ctx), "netbird.cfg")
-        val existed = cfg.exists()
         val opener = object : URLOpener {
             override fun open(url: String, userCode: String) {
                 ui.post {
@@ -121,13 +134,12 @@ object NetbirdLogin {
             override fun onLoginSuccess() {}
         }
         Thread({
+            val (cfg, pending) = preparePending(ctx)
             try {
                 NetbirdEgress.ensureClient(ctx)
-                Auth(cfg.absolutePath, url, null).login(listener(ctx, cfg, existed), opener, false)
+                Auth(pending.absolutePath, url, null).login(listener(ctx, cfg, pending), opener, false)
             } catch (e: Throwable) {
-                dropUnregisteredConfig(cfg, existed)
-                Log.w(TAG, "sso login failed: ${e.javaClass.simpleName}")
-                toast(ctx, ctx.getString(R.string.msg_netbird_login_failed, e.message ?: e.javaClass.simpleName))
+                loginFailed(ctx, pending, e)
             }
         }, "netbird-sso").start()
     }
@@ -152,6 +164,7 @@ object NetbirdLogin {
             if (NetbirdEgress.isRunning()) Log.w(TAG, "moteur NetBird encore actif, config supprimee quand meme")
             File(dir, "netbird.cfg").delete()
             File(dir, "state.json").delete()
+            File(dir, "netbird.cfg.pending").delete()
         }, "netbird-logout").start()
         PreferenceManager.getDefaultSharedPreferences(ctx).edit()
             .remove(NetbirdEgress.PREF_ADDRESS)
