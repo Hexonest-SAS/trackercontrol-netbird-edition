@@ -1,0 +1,140 @@
+name: Suivi de l'amont
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: upstream
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  NDK_VERSION: 29.0.14206865
+
+jobs:
+  upstream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Identité git du bot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fusionner les nouvelles versions publiées
+        id: merge
+        run: |
+          set +e
+          UPSTREAM_REPORT="$RUNNER_TEMP/updated.txt" scripts/update-upstream.sh all
+          rc=$?
+          set -e
+          case $rc in
+            0)
+              names=$(sed -E 's/=/-/' "$RUNNER_TEMP/updated.txt" | tr '\n' '+' | sed 's/+$//')
+              echo "status=updated" >> "$GITHUB_OUTPUT"
+              echo "branch=upstream/${names}" >> "$GITHUB_OUTPUT"
+              echo "summary=$(tr '\n' ' ' < "$RUNNER_TEMP/updated.txt")" >> "$GITHUB_OUTPUT"
+              ;;
+            10) echo "status=none" >> "$GITHUB_OUTPUT" ;;
+            20)
+              echo "status=conflict" >> "$GITHUB_OUTPUT"
+              git diff --name-only --diff-filter=U > "$RUNNER_TEMP/conflicts.txt"
+              ;;
+            *) exit "$rc" ;;
+          esac
+
+      - name: Ouvrir un ticket en cas de conflit
+        if: steps.merge.outputs.status == 'conflict'
+        run: |
+          {
+            echo "La fusion automatique de l'amont a échoué (workflow « Suivi de l'amont », exécution $GITHUB_RUN_ID)."
+            echo
+            echo "Fichiers en conflit :"
+            sed 's/^/- `/; s/$/`/' "$RUNNER_TEMP/conflicts.txt"
+            echo
+            echo "Reprendre à la main : \`scripts/update-upstream.sh all\` en local, puis régler les conflits."
+          } > "$RUNNER_TEMP/issue.md"
+          gh issue create \
+            --title "Amont : conflit de fusion subtree ($(date +%F))" \
+            --label upstream \
+            --body-file "$RUNNER_TEMP/issue.md" \
+          || gh issue create \
+            --title "Amont : conflit de fusion subtree ($(date +%F))" \
+            --body-file "$RUNNER_TEMP/issue.md"
+
+      - uses: actions/setup-go@v5
+        if: steps.merge.outputs.status == 'updated'
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: netbird/go.sum
+
+      - uses: actions/setup-java@v4
+        if: steps.merge.outputs.status == 'updated'
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+        if: steps.merge.outputs.status == 'updated'
+        with:
+          packages: 'platform-tools platforms;android-37.0 ndk;29.0.14206865'
+
+      - uses: dtolnay/rust-toolchain@master
+        if: steps.merge.outputs.status == 'updated'
+        with:
+          toolchain: 1.95.0
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: cargo-ndk
+        if: steps.merge.outputs.status == 'updated'
+        run: cargo install cargo-ndk@4.1.2 --locked
+
+      - name: Moteur NetBird (AAR)
+        if: steps.merge.outputs.status == 'updated'
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+          scripts/build-netbird-aar.sh
+
+      - name: Tests et APK
+        if: steps.merge.outputs.status == 'updated'
+        working-directory: trackercontrol
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+          ./gradlew :app:testFdroidDebugUnitTest assembleFdroidDebug
+
+      - name: Tests wgbridge-rs
+        if: steps.merge.outputs.status == 'updated'
+        working-directory: trackercontrol/wgbridge-rs
+        run: cargo test --lib
+
+      - uses: actions/upload-artifact@v4
+        if: steps.merge.outputs.status == 'updated'
+        with:
+          name: apk-fdroid-debug
+          path: trackercontrol/app/build/outputs/apk/fdroid/debug/*.apk
+
+      - name: Ouvrir la PR vers main
+        if: steps.merge.outputs.status == 'updated'
+        env:
+          BRANCH: ${{ steps.merge.outputs.branch }}
+          SUMMARY: ${{ steps.merge.outputs.summary }}
+        run: |
+          git push --force origin "HEAD:refs/heads/$BRANCH"
+          {
+            echo "Mise à jour automatique de l'amont : $SUMMARY"
+            echo
+            echo "Fusions \`git subtree --squash\` déjà passées par la compilation de l'AAR NetBird, les tests unitaires TrackerControl (fdroidDebug) et \`cargo test --lib\`. L'APK de l'exécution est joint en artefact : $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$RUNNER_TEMP/pr.md"
+          gh pr create --base main --head "$BRANCH" \
+            --title "Amont : $SUMMARY" --body-file "$RUNNER_TEMP/pr.md"

@@ -36,9 +36,12 @@ licence **GNU GPLv3** pour l'ensemble (GPLv3 §5).
 
 ## Versions en amont
 
-| Composant | Dépôt | Version importée |
+Source de vérité : `upstream-versions.env` (sourçable par bash), qui note les dernières versions
+**publiées** (releases non pre-release) déjà incluses.
+
+| Composant | Dépôt | Version suivie |
 |---|---|---|
-| TrackerControl | `https://github.com/TrackerControl/tracker-control-android.git` | `4a3d1939` (main, 2026-11-09) |
+| TrackerControl | `https://github.com/TrackerControl/tracker-control-android.git` | release `2026110101` ; import actuel : commit `4a3d1939` de main (postérieur à cette release) |
 | NetBird | `https://github.com/netbirdio/netbird.git` | `v0.82.0` (`3c00a9787`) |
 
 Le commit « Squashed '<dossier>/' content from commit … » de chaque import note le commit en amont.
@@ -56,12 +59,19 @@ git log --oneline -- netbird/
 ## Mettre à jour l'amont
 
 ```sh
-git subtree pull --prefix=netbird https://github.com/netbirdio/netbird.git vX.Y.Z --squash
-git subtree pull --prefix=trackercontrol https://github.com/TrackerControl/tracker-control-android.git <commit> --squash
+scripts/update-upstream.sh all --dry-run   # versions actuelle / dernière publiée, sans rien modifier
+scripts/update-upstream.sh [tc|nb|all]     # fusionne (git subtree pull --squash) les releases plus récentes
 ```
 
-`git subtree pull` fusionne la nouvelle version avec nos patchs ; les conflits se règlent comme
-une fusion ordinaire. Mettre à jour le tableau des versions ci-dessus.
+Le script lit `upstream-versions.env`, interroge la dernière release publiée de chaque projet,
+fusionne l'étiquette si elle est plus récente (un commit de fusion, puis un commit séparé pour
+`upstream-versions.env`). Codes de sortie : 0 mis à jour, 10 rien à faire, 20 conflit (état de
+fusion laissé pour inspection), 1 erreur. Les conflits avec nos patchs se règlent comme une fusion
+ordinaire.
+
+Le workflow `.github/workflows/upstream.yml` le lance chaque jour (et à la demande) : sans nouveauté
+il s'arrête ; en cas de conflit il ouvre un ticket ; sinon il compile (AAR NetBird, tests, APK
+fdroidDebug, `cargo test --lib`) et ouvre une PR `upstream/<projet>-<étiquette>` vers main.
 
 ## Compiler
 

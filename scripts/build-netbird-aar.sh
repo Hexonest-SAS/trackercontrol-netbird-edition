@@ -34,7 +34,8 @@ done
 
 base=$(git -C "$ROOT" log -1 --format=%s --grep="^Squashed 'netbird/'" | grep -o '[0-9a-f]\{7,\}$' || true)
 patch=$(git -C "$ROOT" rev-parse --short HEAD)
-version="0.82.0-tc+${patch}"
+. "$ROOT/upstream-versions.env"
+version="${NB_RELEASE#v}-tc+${patch}"
 echo "NetBird ${version} (amont ${base:-?}), API ${ANDROID_API}, ${TARGETS}"
 
 mkdir -p "$(dirname "$OUT")"
