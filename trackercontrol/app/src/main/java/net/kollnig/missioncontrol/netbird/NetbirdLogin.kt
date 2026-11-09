@@ -25,7 +25,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 object NetbirdLogin {
     private const val TAG = "NetbirdLogin"
     const val PREF_MANAGEMENT_URL = "netbird_management_url"
-    const val DEFAULT_MANAGEMENT_URL = "https://netbird.hexonest.fr"
+    const val DEFAULT_MANAGEMENT_URL = "https://api.netbird.io:443"
+
+    /** URL http(s) avec un hote, sans espace. */
+    fun isValidManagementUrl(url: String): Boolean {
+        if (url.isEmpty() || url.any { it.isWhitespace() }) return false
+        val u = try { android.net.Uri.parse(url) } catch (e: Exception) { return false }
+        return (u.scheme == "https" || u.scheme == "http") && !u.host.isNullOrEmpty()
+    }
 
     private val ui = Handler(Looper.getMainLooper())
 

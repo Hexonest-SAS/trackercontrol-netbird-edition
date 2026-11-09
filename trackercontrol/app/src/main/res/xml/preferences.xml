@@ -246,7 +246,7 @@
                 android:summary="@string/summary_netbird_enabled"
                 android:title="@string/setting_netbird_enabled" />
             <EditTextPreference
-                android:defaultValue="https://netbird.hexonest.fr"
+                android:defaultValue="https://api.netbird.io:443"
                 android:inputType="textUri"
                 android:key="netbird_management_url"
                 android:title="@string/setting_netbird_management_url" />

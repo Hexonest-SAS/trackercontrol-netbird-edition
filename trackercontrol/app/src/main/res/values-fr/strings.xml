@@ -715,6 +715,8 @@ Cordialement,\n\n]]></string>
     <string name="setting_netbird_enabled">Utiliser NetBird</string>
     <string name="summary_netbird_enabled">Fait passer le trafic par le moteur NetBird embarqué (remplace WireGuard)</string>
     <string name="setting_netbird_management_url">URL du serveur de management</string>
+    <string name="msg_netbird_invalid_url">URL invalide : saisir une adresse du type https://netbird.exemple.fr:443</string>
+    <string name="summary_netbird_management_url">%1$s. Saisissez l\'adresse de votre propre serveur NetBird auto-hébergé pour l\'utiliser à la place.</string>
     <string name="setting_netbird_login_key">Se connecter avec une clé d\'installation</string>
     <string name="setting_netbird_login_sso">Se connecter par SSO</string>
     <string name="setting_netbird_logout">Se déconnecter</string>

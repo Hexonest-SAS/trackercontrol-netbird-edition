@@ -863,6 +863,8 @@ Sincerely,\n\n]]></string>
     <string name="setting_netbird_enabled">Use NetBird</string>
     <string name="summary_netbird_enabled">Route traffic through the embedded NetBird engine (replaces WireGuard)</string>
     <string name="setting_netbird_management_url">Management server URL</string>
+    <string name="msg_netbird_invalid_url">Invalid URL: enter an address like https://netbird.example.com:443</string>
+    <string name="summary_netbird_management_url">%1$s. Enter the address of your own self-hosted NetBird server to use it instead.</string>
     <string name="setting_netbird_login_key">Sign in with a setup key</string>
     <string name="setting_netbird_login_sso">Sign in with SSO</string>
     <string name="setting_netbird_logout">Sign out</string>

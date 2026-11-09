@@ -1124,6 +1124,17 @@ public class ActivitySettings extends AppCompatActivity implements SharedPrefere
                         .show();
                 return true;
             });
+        Preference urlPref = getPreferenceScreen().findPreference(
+                net.kollnig.missioncontrol.netbird.NetbirdLogin.PREF_MANAGEMENT_URL);
+        if (urlPref != null)
+            urlPref.setOnPreferenceChangeListener((p, newValue) -> {
+                String v = newValue instanceof String ? ((String) newValue).trim() : "";
+                if (!net.kollnig.missioncontrol.netbird.NetbirdLogin.INSTANCE.isValidManagementUrl(v)) {
+                    Toast.makeText(this, R.string.msg_netbird_invalid_url, Toast.LENGTH_LONG).show();
+                    return false;
+                }
+                return true;
+            });
         updateNetbirdStatus();
     }
 
@@ -1157,7 +1168,8 @@ public class ActivitySettings extends AppCompatActivity implements SharedPrefere
             pref.setSummary(summary);
         pref = screen.findPreference(net.kollnig.missioncontrol.netbird.NetbirdLogin.PREF_MANAGEMENT_URL);
         if (pref != null)
-            pref.setSummary(net.kollnig.missioncontrol.netbird.NetbirdLogin.INSTANCE.managementUrl(this));
+            pref.setSummary(getString(R.string.summary_netbird_management_url,
+                    net.kollnig.missioncontrol.netbird.NetbirdLogin.INSTANCE.managementUrl(this)));
     }
 
     private void updateWireGuardStatus() {
