@@ -20,6 +20,8 @@ pub mod callbacks;
 pub mod config;
 pub mod dns;
 pub mod keys;
+// NetBird Edition: engine-agnostic hooks live in their own modules.
+pub mod netbird;
 pub mod policy;
 // The C ABI the NetGuard engine links against. It lives in this crate, not
 // in tc-dns, so the cdylib itself defines the exported symbols rather than
@@ -28,5 +30,10 @@ pub mod tcdns_capi;
 pub mod transport;
 pub mod tunnel;
 
+// NetBird Edition: #[macro_use] lets netbird_jni reuse with_native_env!.
 #[cfg(target_os = "android")]
+#[macro_use]
 mod jni_bindings;
+// NetBird Edition
+#[cfg(target_os = "android")]
+mod netbird_jni;
