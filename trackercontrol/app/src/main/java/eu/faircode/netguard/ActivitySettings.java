@@ -138,6 +138,9 @@ public class ActivitySettings extends AppCompatActivity implements SharedPrefere
 
     private static final Intent INTENT_VPN_SETTINGS = new Intent("android.net.vpn.SETTINGS");
 
+    /** Extra optionnel : cle d'un sous-ecran de reglages a ouvrir directement (ex. "screen_netbird"). */
+    public static final String EXTRA_OPEN_SCREEN = "open_screen";
+
     protected void onCreate(Bundle savedInstanceState) {
         setTheme(R.style.AppThemeRed_NoActionBar);
         super.onCreate(savedInstanceState);
@@ -179,8 +182,15 @@ public class ActivitySettings extends AppCompatActivity implements SharedPrefere
         }, false);
 
         if (savedInstanceState == null) {
+            FragmentSettings first = new FragmentSettings();
+            String openScreen = getIntent().getStringExtra(EXTRA_OPEN_SCREEN);
+            if (openScreen != null) {
+                Bundle args = new Bundle();
+                args.putString(PreferenceFragmentCompat.ARG_PREFERENCE_ROOT, openScreen);
+                first.setArguments(args);
+            }
             getSupportFragmentManager().beginTransaction()
-                    .replace(R.id.settings_container, new FragmentSettings())
+                    .replace(R.id.settings_container, first)
                     .commit();
         }
         running = true;

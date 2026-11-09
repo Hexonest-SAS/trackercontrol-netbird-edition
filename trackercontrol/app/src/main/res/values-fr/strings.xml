@@ -732,4 +732,15 @@ Cordialement,\n\n]]></string>
     <string name="msg_netbird_logout_confirm">Se déconnecter de NetBird ? La configuration sera supprimée.</string>
     <string name="msg_netbird_ok">OK</string>
     <string name="msg_netbird_cancel">Annuler</string>
+
+    <string name="vpn_netbird_title">NetBird</string>
+    <string name="vpn_netbird_not_configured">Non configuré — connectez-vous depuis les réglages NetBird</string>
+    <string name="vpn_netbird_connecting">Connexion en cours…</string>
+    <string name="vpn_netbird_disconnected">Déconnecté</string>
+    <string name="vpn_netbird_connected">Connecté · %1$s · %2$d/%3$d pairs</string>
+    <string name="vpn_netbird_error">Erreur : %1$s</string>
+    <string name="vpn_netbird_settings">Réglages NetBird</string>
+    <string name="vpn_netbird_peer_connecting">connexion</string>
+    <string name="vpn_netbird_peer_idle">inactif</string>
+    <string name="vpn_netbird_peer_relayed">relais</string>
 </resources>

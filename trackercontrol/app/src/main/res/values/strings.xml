@@ -880,4 +880,15 @@ Sincerely,\n\n]]></string>
     <string name="msg_netbird_logout_confirm">Sign out of NetBird? The configuration will be deleted.</string>
     <string name="msg_netbird_ok">OK</string>
     <string name="msg_netbird_cancel">Cancel</string>
+
+    <string name="vpn_netbird_title">NetBird</string>
+    <string name="vpn_netbird_not_configured">Not configured — sign in from the NetBird settings</string>
+    <string name="vpn_netbird_connecting">Connecting…</string>
+    <string name="vpn_netbird_disconnected">Disconnected</string>
+    <string name="vpn_netbird_connected">Connected · %1$s · %2$d/%3$d peers</string>
+    <string name="vpn_netbird_error">Error: %1$s</string>
+    <string name="vpn_netbird_settings">NetBird settings</string>
+    <string name="vpn_netbird_peer_connecting">connecting</string>
+    <string name="vpn_netbird_peer_idle">idle</string>
+    <string name="vpn_netbird_peer_relayed">relay</string>
 </resources>

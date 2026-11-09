@@ -15,6 +15,7 @@ import eu.faircode.netguard.ServiceSinkhole
 import io.netbird.gomobile.android.Android
 import io.netbird.gomobile.android.DNSInspector
 import io.netbird.gomobile.android.Client
+import io.netbird.gomobile.android.ConnectionListener
 import io.netbird.gomobile.android.DNSList
 import io.netbird.gomobile.android.DnsReadyListener
 import io.netbird.gomobile.android.IFaceDiscover
@@ -67,6 +68,93 @@ object NetbirdEgress {
 
     fun getLastError(): String? = lastError
 
+    private fun setError(e: String?) {
+        if (lastError == e) return
+        lastError = e
+        notifyStateChanged()
+    }
+
+    // ---- Etat observe par l'interface (onglet VPN) -------------------------------------------
+
+    const val STATE_DISCONNECTED = 0
+    const val STATE_CONNECTING = 1
+    const val STATE_CONNECTED = 2
+
+    data class NetbirdPeer(
+        val name: String,
+        val fqdn: String,
+        val ip: String,
+        val connStatus: Int,
+        val relayed: Boolean,
+        val latency: String
+    )
+
+    @Volatile private var connState = STATE_DISCONNECTED
+    @Volatile private var fqdn: String = ""
+    @Volatile private var address: String = ""
+    @Volatile private var peerCount = 0L
+    private val stateListeners = java.util.concurrent.CopyOnWriteArrayList<Runnable>()
+
+    fun getConnectionState(): Int = connState
+    fun getFqdn(): String = fqdn
+    fun getAddress(): String = address
+    fun getPeerCount(): Long = peerCount
+
+    fun addStateListener(l: Runnable) { stateListeners.addIfAbsent(l) }
+    fun removeStateListener(l: Runnable) { stateListeners.remove(l) }
+
+    /** Previent les ecouteurs sur le thread principal (les rappels du moteur viennent de threads Go). */
+    private fun notifyStateChanged() {
+        mainHandler.post {
+            for (l in stateListeners) try { l.run() } catch (e: Throwable) { Log.w(TAG, "listener threw", e) }
+        }
+    }
+
+    private fun setConnState(s: Int) {
+        if (connState == s) return
+        connState = s
+        notifyStateChanged()
+    }
+
+    private val connectionListener = object : ConnectionListener {
+        override fun onStateChanged(state: Long) {}
+        override fun onConnected() = setConnState(STATE_CONNECTED)
+        override fun onDisconnected() = setConnState(STATE_DISCONNECTED)
+        override fun onConnecting() = setConnState(STATE_CONNECTING)
+        override fun onDisconnecting() = setConnState(STATE_DISCONNECTED)
+        override fun onAddressChanged(fqdn: String?, address: String?) {
+            this@NetbirdEgress.fqdn = fqdn ?: ""
+            this@NetbirdEgress.address = address ?: ""
+            notifyStateChanged()
+        }
+        override fun onPeersListChanged(numberOfPeers: Long) {
+            peerCount = numberOfPeers
+            notifyStateChanged()
+        }
+    }
+
+    /** Pairs connus du moteur : connectes d'abord, puis par nom. Vide sans client ou en cas d'erreur. */
+    fun peers(): List<NetbirdPeer> {
+        val c = synchronized(lock) { client } ?: return emptyList()
+        return try {
+            val arr = c.peersList()
+            val out = ArrayList<NetbirdPeer>()
+            for (i in 0 until arr.size()) {
+                val p = arr.get(i)
+                val f = p.fqdn ?: ""
+                out.add(NetbirdPeer(
+                    name = f.substringBefore('.').ifEmpty { f },
+                    fqdn = f, ip = p.ip ?: "", connStatus = p.connStatus.toInt(),
+                    relayed = p.relayed, latency = p.latency ?: ""))
+            }
+            out.sortedWith(compareByDescending<NetbirdPeer> { it.connStatus == 2 }
+                .thenBy { it.name.lowercase() })
+        } catch (e: Throwable) {
+            Log.w(TAG, "peersList", e)
+            emptyList()
+        }
+    }
+
     fun isRunning(): Boolean = synchronized(lock) { thread?.isAlive == true }
 
     /** Routes NetBird memorisees (separees par ";"), sans entree vide. */
@@ -90,7 +178,7 @@ object NetbirdEgress {
             stop(stopSocketpair)
             return true
         }
-        lastError = null
+        setError(null)
 
         var renew = false
         var startEngine = false
@@ -115,7 +203,7 @@ object NetbirdEgress {
                 c = client!!
             } else {
                 if (!configFile(vpnService).exists()) {
-                    lastError = "NetBird non configuré"
+                    setError("NetBird non configuré")
                     Log.w(TAG, "aucune configuration NetBird, moteur non lance")
                     return true
                 }
@@ -140,14 +228,14 @@ object NetbirdEgress {
             stopSocketpair()
             val rx = startSocketpair()
             if (rx < 0) {
-                lastError = "Could not create NetBird packet socket"
+                setError("Could not create NetBird packet socket")
                 return false
             }
             Android.setSocketpairTunWriteFd(dupTun(vpnFd).toLong())
             c.renewTun(rx.toLong()) // le moteur prend possession de rx
             return true
         } catch (e: Throwable) {
-            lastError = "NetBird renewTun failed: ${e.message ?: e.javaClass.simpleName}"
+            setError("NetBird renewTun failed: ${e.message ?: e.javaClass.simpleName}")
             Log.e(TAG, "renewTun", e)
             return false
         }
@@ -166,7 +254,10 @@ object NetbirdEgress {
         ParcelFileDescriptor.dup(pfd.fileDescriptor).detachFd()
 
     private fun createClient(ctx: Context): Client =
-        Android.newClient(
+        newClientWithListener(ctx)
+
+    private fun newClientWithListener(ctx: Context): Client {
+        val c = Android.newClient(
             Build.VERSION.SDK_INT.toLong(),
             Build.MODEL ?: "android",
             "trackercontrol-netbird",
@@ -174,6 +265,9 @@ object NetbirdEgress {
             ifaceDiscover,
             networkListener
         )
+        c.setConnectionListener(connectionListener)
+        return c
+    }
 
     private fun startThread(c: Client, ctx: Context) {
         val dir = File(ctx.filesDir, "netbird").apply { mkdirs() }
@@ -192,7 +286,7 @@ object NetbirdEgress {
                     override fun onReady() {}
                 }, Android.newEnvList())
             } catch (e: Throwable) {
-                lastError = "NetBird: ${e.message ?: e.javaClass.simpleName}"
+                setError("NetBird: ${e.message ?: e.javaClass.simpleName}")
                 Log.e(TAG, "runWithoutLogin", e)
             } finally {
                 Log.i(TAG, "moteur NetBird arrete")
@@ -200,12 +294,14 @@ object NetbirdEgress {
                 synchronized(lock) {
                     if (thread === Thread.currentThread()) tunConfigured = false
                 }
+                setConnState(STATE_DISCONNECTED)
             }
         }, "netbird-engine")
         synchronized(lock) {
             thread = t
             tunConfigured = false
         }
+        setConnState(STATE_CONNECTING)
         t.start()
     }
 
@@ -272,6 +368,7 @@ object NetbirdEgress {
             tunPfd = null
             tunConfigured = false
         }
+        if (t != null) setConnState(STATE_DISCONNECTED)
         if (t != null) {
             try { c?.stop() } catch (e: Throwable) { Log.w(TAG, "client.stop", e) }
             if (Thread.currentThread() !== t) {
@@ -353,7 +450,7 @@ object NetbirdEgress {
                     try { ParcelFileDescriptor.adoptFd(rx).close() } catch (_: Throwable) {}
                 }
                 try { stop() } catch (_: Throwable) {}
-                lastError = "NetBird configureInterface: ${e.message ?: e.javaClass.simpleName}"
+                setError("NetBird configureInterface: ${e.message ?: e.javaClass.simpleName}")
                 throw e
             }
             synchronized(lock) { tunConfigured = true }

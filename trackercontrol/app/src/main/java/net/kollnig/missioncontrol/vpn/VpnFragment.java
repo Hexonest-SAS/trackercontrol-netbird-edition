@@ -41,6 +41,7 @@ import com.google.android.material.materialswitch.MaterialSwitch;
 
 import net.kollnig.missioncontrol.ActivityWireGuardProfiles;
 import net.kollnig.missioncontrol.R;
+import net.kollnig.missioncontrol.netbird.NetbirdEgress;
 import net.kollnig.missioncontrol.wg.IvpnProfileGenerator;
 import net.kollnig.missioncontrol.wg.MullvadProfileGenerator;
 import net.kollnig.missioncontrol.wg.WgConfigParser;
@@ -73,6 +74,22 @@ public class VpnFragment extends Fragment implements SharedPreferences.OnSharedP
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final List<VpnCountry> mullvadCountryCache = new ArrayList<>();
     private final List<VpnCountry> ivpnCountryCache = new ArrayList<>();
+
+    // NetBird : pairs mis en cache (lus hors du thread principal) et rafraichissement periodique.
+    private static final long NB_REFRESH_MS = 5000L;
+    private volatile List<NetbirdEgress.NetbirdPeer> nbPeers = new ArrayList<>();
+    private boolean nbVisible;
+    private final Runnable nbStateListener = this::refreshNetbird;
+    private final Runnable nbTicker = new Runnable() {
+        @Override
+        public void run() {
+            if (!nbVisible)
+                return;
+            if (isNetbirdEnabled())
+                refreshNetbird();
+            mainHandler.postDelayed(this, NB_REFRESH_MS);
+        }
+    };
 
     private boolean loadingCountries;
     private boolean progressVisible;
@@ -132,6 +149,10 @@ public class VpnFragment extends Fragment implements SharedPreferences.OnSharedP
     public void onResume() {
         super.onResume();
         prefs.registerOnSharedPreferenceChangeListener(this);
+        NetbirdEgress.INSTANCE.addStateListener(nbStateListener);
+        nbVisible = true;
+        mainHandler.removeCallbacks(nbTicker);
+        mainHandler.post(nbTicker);
         refreshUi();
     }
 
@@ -139,6 +160,34 @@ public class VpnFragment extends Fragment implements SharedPreferences.OnSharedP
     public void onPause() {
         super.onPause();
         prefs.unregisterOnSharedPreferenceChangeListener(this);
+        NetbirdEgress.INSTANCE.removeStateListener(nbStateListener);
+        nbVisible = false;
+        mainHandler.removeCallbacks(nbTicker);
+    }
+
+    private boolean isNetbirdEnabled() {
+        return prefs != null && prefs.getBoolean(NetbirdEgress.PREF_ENABLED, false);
+    }
+
+    /** Relit les pairs hors du thread principal puis rafraichit la liste. */
+    private void refreshNetbird() {
+        if (!isAdded() || adapter == null)
+            return;
+        if (!isNetbirdEnabled()) {
+            nbPeers = new ArrayList<>();
+            refreshUi();
+            return;
+        }
+        try {
+            executor.execute(() -> {
+                List<NetbirdEgress.NetbirdPeer> peers = NetbirdEgress.INSTANCE.peers();
+                mainHandler.post(() -> {
+                    nbPeers = peers;
+                    refreshUi();
+                });
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+        }
     }
 
     @Override
@@ -149,6 +198,10 @@ public class VpnFragment extends Fragment implements SharedPreferences.OnSharedP
 
     @Override
     public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+        if (NetbirdEgress.PREF_ENABLED.equals(key)) {
+            refreshNetbird();
+            return;
+        }
         if ("wg_enabled".equals(key) ||
                 WgProfileManager.PREF_WG_PROFILE.equals(key) ||
                 WgProfileManager.PREF_WG_PROFILES.equals(key) ||
@@ -829,6 +882,8 @@ public class VpnFragment extends Fragment implements SharedPreferences.OnSharedP
         private static final int TYPE_EMPTY = 7;
         private static final int TYPE_FOOTER = 8;
         private static final int TYPE_PROVIDER_SETUP = 9;
+        private static final int TYPE_NB_CARD = 10;
+        private static final int TYPE_NB_PEER = 11;
 
         private final List<VpnCountry> countries = new ArrayList<>();
 
@@ -843,9 +898,16 @@ public class VpnFragment extends Fragment implements SharedPreferences.OnSharedP
 
         @Override
         public int getItemViewType(int position) {
-            if (position == 0)
-                return TYPE_STATUS;
-            position--;
+            int nb = nbRows();
+            if (position < nb)
+                return position == 0 ? TYPE_NB_CARD : TYPE_NB_PEER;
+            position -= nb;
+            // NetBird prime sur WireGuard : pas de carte d'etat WireGuard quand il est active.
+            if (nb == 0) {
+                if (position == 0)
+                    return TYPE_STATUS;
+                position--;
+            }
 
             if (isFirstTimeVpnSetup())
                 return TYPE_INTRO;
@@ -885,6 +947,10 @@ public class VpnFragment extends Fragment implements SharedPreferences.OnSharedP
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
             LayoutInflater inflater = LayoutInflater.from(parent.getContext());
+            if (viewType == TYPE_NB_CARD)
+                return new StatusViewHolder(inflater.inflate(R.layout.item_vpn_status, parent, false));
+            if (viewType == TYPE_NB_PEER)
+                return new NbPeerViewHolder(inflater.inflate(R.layout.item_vpn_netbird_peer, parent, false));
             if (viewType == TYPE_STATUS)
                 return new StatusViewHolder(inflater.inflate(R.layout.item_vpn_status, parent, false));
             if (viewType == TYPE_INTRO)
@@ -911,7 +977,11 @@ public class VpnFragment extends Fragment implements SharedPreferences.OnSharedP
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
             int viewType = getItemViewType(position);
-            if (viewType == TYPE_STATUS)
+            if (viewType == TYPE_NB_CARD)
+                bindNetbirdCard((StatusViewHolder) holder);
+            else if (viewType == TYPE_NB_PEER)
+                bindNetbirdPeer((NbPeerViewHolder) holder, nbPeers.get(position - 1));
+            else if (viewType == TYPE_STATUS)
                 bindStatus((StatusViewHolder) holder);
             else if (viewType == TYPE_INTRO)
                 bindIntro((IntroViewHolder) holder);
@@ -935,7 +1005,7 @@ public class VpnFragment extends Fragment implements SharedPreferences.OnSharedP
         @Override
         public int getItemCount() {
             if (isFirstTimeVpnSetup())
-                return 2;
+                return nbRows() + (nbRows() == 0 ? 2 : 1);
 
             int count = listStartPosition();
             if (isWireGuardMode())
@@ -957,8 +1027,89 @@ public class VpnFragment extends Fragment implements SharedPreferences.OnSharedP
                     openWireGuardProfiles(ActivityWireGuardProfiles.SETUP_PROTON));
         }
 
+        /** Lignes NetBird en tete : carte + un pair par ligne, ou 0 si NetBird est desactive. */
+        private int nbRows() {
+            return isNetbirdEnabled() ? 1 + nbPeers.size() : 0;
+        }
+
+        private void bindNetbirdCard(StatusViewHolder holder) {
+            NetbirdEgress nb = NetbirdEgress.INSTANCE;
+            boolean configured = NetbirdEgress.INSTANCE.configFile(requireContext()).exists();
+            String error = nb.getLastError();
+            int state = nb.getConnectionState();
+            String summary;
+            if (!configured) {
+                summary = getString(R.string.vpn_netbird_not_configured);
+            } else if (state == NetbirdEgress.STATE_CONNECTED) {
+                int connected = 0;
+                for (NetbirdEgress.NetbirdPeer p : nbPeers)
+                    if (p.getConnStatus() == 2)
+                        connected++;
+                String addr = nb.getAddress().isEmpty() ? prefs.getString(NetbirdEgress.PREF_ADDRESS, "")
+                        : nb.getAddress();
+                summary = getString(R.string.vpn_netbird_connected, addr, connected, nbPeers.size());
+            } else if (error != null && !error.isEmpty()) {
+                summary = getString(R.string.vpn_netbird_error, error);
+            } else if (state == NetbirdEgress.STATE_CONNECTING) {
+                summary = getString(R.string.vpn_netbird_connecting);
+            } else {
+                summary = getString(R.string.vpn_netbird_disconnected);
+            }
+            holder.flag.setVisibility(View.GONE);
+            holder.title.setText(R.string.vpn_netbird_title);
+            holder.summary.setVisibility(View.VISIBLE);
+            holder.summary.setText(summary);
+            holder.summary.setMaxLines(2);
+            holder.setTextStartMargin(8);
+
+            holder.switchView.setOnCheckedChangeListener(null);
+            holder.switchView.setChecked(true);
+            holder.switchView.setOnCheckedChangeListener((buttonView, checked) -> {
+                prefs.edit().putBoolean(NetbirdEgress.PREF_ENABLED, checked).apply();
+                // Le listener de preferences d'ActivitySettings n'est actif que quand cet ecran est ouvert.
+                ServiceSinkhole.reload("netbird toggle", requireContext(), false);
+                refreshNetbird();
+            });
+
+            holder.settings.setVisibility(View.VISIBLE);
+            holder.settings.setContentDescription(getString(R.string.vpn_netbird_settings));
+            holder.settings.setOnClickListener(v -> {
+                Intent i = new Intent(requireContext(), ActivitySettings.class);
+                i.putExtra(ActivitySettings.EXTRA_OPEN_SCREEN, "screen_netbird");
+                startActivity(i);
+            });
+        }
+
+        private void bindNetbirdPeer(NbPeerViewHolder holder, NetbirdEgress.NetbirdPeer p) {
+            holder.name.setText(p.getName());
+            holder.ip.setText(p.getIp());
+            int status = p.getConnStatus();
+            int color;
+            String state;
+            if (status == 2) {
+                color = 0xFF2E9E4F;
+                StringBuilder sb = new StringBuilder();
+                if (p.getRelayed())
+                    sb.append(getString(R.string.vpn_netbird_peer_relayed));
+                if (!p.getLatency().isEmpty()) {
+                    if (sb.length() > 0)
+                        sb.append(" · ");
+                    sb.append(p.getLatency());
+                }
+                state = sb.toString();
+            } else if (status == 1) {
+                color = 0xFFF29900;
+                state = getString(R.string.vpn_netbird_peer_connecting);
+            } else {
+                color = 0xFF9E9E9E;
+                state = getString(R.string.vpn_netbird_peer_idle);
+            }
+            holder.dot.setTextColor(color);
+            holder.state.setText(state);
+        }
+
         private int listStartPosition() {
-            int position = 2;
+            int position = nbRows() == 0 ? 2 : nbRows() + 1;
             if (progressVisible)
                 position++;
             if (!isWireGuardMode() && countryErrorVisible)
@@ -1160,6 +1311,21 @@ public class VpnFragment extends Fragment implements SharedPreferences.OnSharedP
                 return;
             params.setMarginStart(margin);
             text.setLayoutParams(params);
+        }
+    }
+
+    private static class NbPeerViewHolder extends RecyclerView.ViewHolder {
+        final TextView dot;
+        final TextView name;
+        final TextView ip;
+        final TextView state;
+
+        NbPeerViewHolder(View itemView) {
+            super(itemView);
+            dot = itemView.findViewById(R.id.nbPeerDot);
+            name = itemView.findViewById(R.id.nbPeerName);
+            ip = itemView.findViewById(R.id.nbPeerIp);
+            state = itemView.findViewById(R.id.nbPeerState);
         }
     }
 
