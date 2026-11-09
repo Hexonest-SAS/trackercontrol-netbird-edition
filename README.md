@@ -1,0 +1,61 @@
+# TrackerControl + NetBird
+
+Fork personnel de [TrackerControl](https://github.com/TrackerControl/tracker-control-android)
+(GPLv3) qui embarque le moteur du client [NetBird](https://github.com/netbirdio/netbird) (BSD-3)
+à la place de son pont WireGuard : un seul VPN Android qui filtre les traqueurs et rejoint le
+réseau NetBird. Usage personnel, rien n'est publié (voir `CLAUDE.md`).
+
+Licence de l'ensemble : GPLv3 (celle de TrackerControl ; le code NetBird garde sa licence BSD-3).
+
+## Structure
+
+| Dossier | Contenu |
+|---|---|
+| `trackercontrol/` | TrackerControl en amont (`git subtree`), plus nos patchs |
+| `netbird/` | NetBird en amont (`git subtree`), plus nos patchs (moteur Go compilé par gomobile) |
+| `scripts/` | outils du fork (`env.sh` : chemins Go, gomobile, SDK, NDK) |
+| `upstream/` | clones de référence de l'étude, ignorés par git |
+
+## Versions en amont
+
+| Composant | Dépôt | Version importée |
+|---|---|---|
+| TrackerControl | `https://github.com/TrackerControl/tracker-control-android.git` | `4a3d1939` (main, 2026-11-09) |
+| NetBird | `https://github.com/netbirdio/netbird.git` | `v0.82.0` (`3c00a9787`) |
+
+Le commit « Squashed '<dossier>/' content from commit … » de chaque import note le commit en amont.
+
+## Patchs
+
+Chaque modification des sources en amont fait l'objet d'un commit séparé, préfixé
+`trackercontrol:` ou `netbird:`, pour être relue et reportée lors d'une mise à jour.
+Lister les patchs d'un composant depuis son dernier import :
+
+```sh
+git log --oneline -- netbird/
+```
+
+## Mettre à jour l'amont
+
+```sh
+git subtree pull --prefix=netbird https://github.com/netbirdio/netbird.git vX.Y.Z --squash
+git subtree pull --prefix=trackercontrol https://github.com/TrackerControl/tracker-control-android.git <commit> --squash
+```
+
+`git subtree pull` fusionne la nouvelle version avec nos patchs ; les conflits se règlent comme
+une fusion ordinaire. Mettre à jour le tableau des versions ci-dessus.
+
+## Compiler
+
+Outils (installés sans sudo, voir `scripts/env.sh`) : Go 1.26.10, gomobile et gobind épinglés sur
+la version `golang.org/x/mobile` du `go.mod` de NetBird, Android SDK (plateforme 37.0), NDK
+29.0.14206865 (épinglé par TrackerControl), Rust 1.95.0 et cargo-ndk 4.1.2
+(`trackercontrol/scripts/setup_rust_android.sh`), OpenJDK 25.
+
+```sh
+. scripts/env.sh
+cd trackercontrol
+echo "sdk.dir=$HOME/Android/Sdk" > local.properties
+./gradlew assembleFdroidDebug
+# APK : app/build/outputs/apk/fdroid/debug/
+```

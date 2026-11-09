@@ -1,4 +1,4 @@
-# Sources en amont, clonées pour référence (le fork vit dans app/ et netbird/ une fois créés)
+# Clones de référence de l étude (le fork vit dans trackercontrol/ et netbird/)
 upstream/
 build/
 *.apk
