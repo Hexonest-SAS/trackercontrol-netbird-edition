@@ -1,0 +1,6 @@
+# Sources en amont, clonées pour référence (le fork vit dans app/ et netbird/ une fois créés)
+upstream/
+build/
+*.apk
+local.properties
+.gradle/
