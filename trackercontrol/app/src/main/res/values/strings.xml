@@ -891,4 +891,6 @@ Sincerely,\n\n]]></string>
     <string name="vpn_netbird_peer_connecting">connecting</string>
     <string name="vpn_netbird_peer_idle">idle</string>
     <string name="vpn_netbird_peer_relayed">relay</string>
+    <string name="msg_netbird_relogin_title">NetBird: sign-in required</string>
+    <string name="msg_netbird_relogin_detail">Open Settings → NetBird to sign in again</string>
 </resources>

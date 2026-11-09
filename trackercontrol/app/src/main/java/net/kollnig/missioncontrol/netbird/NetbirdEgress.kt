@@ -1,6 +1,8 @@
 package net.kollnig.missioncontrol.netbird
 
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -10,8 +12,14 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.preference.PreferenceManager
+import eu.faircode.netguard.ActivitySettings
+import eu.faircode.netguard.PendingIntentCompat
 import eu.faircode.netguard.ServiceSinkhole
+import eu.faircode.netguard.Util
+import net.kollnig.missioncontrol.R
 import io.netbird.gomobile.android.Android
 import io.netbird.gomobile.android.DNSInspector
 import io.netbird.gomobile.android.Client
@@ -50,6 +58,15 @@ object NetbirdEgress {
     const val PREF_MTU = "netbird_mtu"
 
     private const val STOP_JOIN_MS = 5000L
+    private const val NOTIFY_RELOGIN = 17
+
+    // Reconnexion automatique : arret demande (stop()) ou non, tentative de relance en cours.
+    @Volatile private var stopRequested = false
+    @Volatile private var restartAttempt = 0
+    private val restartRunnable = Runnable { onRestartDue() }
+    private val networkExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "netbird-network").apply { isDaemon = true }
+    }
 
     private val lock = Any()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -111,6 +128,10 @@ object NetbirdEgress {
     }
 
     private fun setConnState(s: Int) {
+        if (s == STATE_CONNECTED) {
+            restartAttempt = 0
+            cancelReloginNotification()
+        }
         if (connState == s) return
         connState = s
         notifyStateChanged()
@@ -316,11 +337,16 @@ object NetbirdEgress {
             override fun cacheDir(): String = ctx.cacheDir.absolutePath
         }
         val dnsList = underlyingDnsList(ctx)
+        val appCtx = ctx.applicationContext
+        stopRequested = false
         val t = Thread({
             var ownInspector: DnsPacketInspector? = null
             try {
                 Log.i(TAG, "moteur NetBird demarre")
                 ownInspector = installDnsInspector(ctx)
+                try { c.setNetworkAvailable(Util.isConnected(ctx)) } catch (e: Throwable) {
+                    Log.w(TAG, "setNetworkAvailable", e)
+                }
                 c.runWithoutLogin(files, dnsList, object : DnsReadyListener {
                     override fun onReady() {}
                 }, Android.newEnvList())
@@ -330,10 +356,13 @@ object NetbirdEgress {
             } finally {
                 Log.i(TAG, "moteur NetBird arrete")
                 ownInspector?.let { removeDnsInspector(it) }
-                synchronized(lock) {
-                    if (thread === Thread.currentThread()) tunConfigured = false
+                val unexpected = synchronized(lock) {
+                    val own = thread === Thread.currentThread()
+                    if (own) tunConfigured = false
+                    own && !stopRequested
                 }
                 setConnState(STATE_DISCONNECTED)
+                if (unexpected) onEngineExitedUnexpectedly(appCtx)
             }
         }, "netbird-engine")
         synchronized(lock) {
@@ -342,6 +371,85 @@ object NetbirdEgress {
         }
         setConnState(STATE_CONNECTING)
         t.start()
+    }
+
+    /** Le moteur est sorti sans que stop() l'ait demande : reconnexion manuelle ou relance avec backoff. */
+    private fun onEngineExitedUnexpectedly(ctx: Context) {
+        val err = lastError
+        if (NetbirdReconnect.needsRelogin(err)) {
+            Log.w(TAG, "session NetBird a refaire: $err")
+            showReloginNotification(ctx)
+            return
+        }
+        val delay = NetbirdReconnect.backoffMs(restartAttempt)
+        restartAttempt++
+        Log.w(TAG, "moteur NetBird arrete ($err), relance dans ${delay / 1000} s")
+        mainHandler.removeCallbacks(restartRunnable)
+        mainHandler.postDelayed(restartRunnable, delay)
+    }
+
+    private fun onRestartDue() {
+        val ctx = synchronized(lock) { service } ?: return
+        if (stopRequested || !prefs(ctx).getBoolean(PREF_ENABLED, false)) return
+        scheduleReload()
+    }
+
+    private fun showReloginNotification(ctx: Context) {
+        try {
+            val i = Intent(ctx, ActivitySettings::class.java)
+                .putExtra(ActivitySettings.EXTRA_OPEN_SCREEN, "screen_netbird")
+            val pi = PendingIntentCompat.getActivity(ctx, NOTIFY_RELOGIN, i, PendingIntent.FLAG_UPDATE_CURRENT)
+            val text = ctx.getString(R.string.msg_netbird_relogin_detail)
+            val b = NotificationCompat.Builder(ctx, "notify")
+                .setSmallIcon(R.drawable.ic_error_white_24dp)
+                .setContentTitle(ctx.getString(R.string.msg_netbird_relogin_title))
+                .setContentText(text)
+                .setContentIntent(pi)
+                .setColor(ctx.resources.getColor(R.color.colorTrackerControl))
+                .setAutoCancel(true)
+                .setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            Util.notify(ctx, NOTIFY_RELOGIN, NotificationCompat.BigTextStyle(b).bigText(text).build())
+        } catch (e: Throwable) {
+            Log.w(TAG, "notification de reconnexion", e)
+        }
+    }
+
+    private var notifCtx: Context? = null
+
+    private fun cancelReloginNotification() {
+        val ctx = synchronized(lock) { service }?.applicationContext ?: notifCtx ?: return
+        cancelReloginNotification(ctx)
+    }
+
+    /** Retire la notification « reconnexion necessaire » (connexion retablie, deconnexion). */
+    @JvmStatic
+    fun cancelReloginNotification(ctx: Context) {
+        notifCtx = ctx.applicationContext
+        try { NotificationManagerCompat.from(ctx).cancel(NOTIFY_RELOGIN) } catch (e: Throwable) {
+            Log.w(TAG, "cancel notification", e)
+        }
+    }
+
+    /**
+     * Le reseau sous-jacent a change : previent le moteur (disponibilite, changement de reseau,
+     * DNS de l'hote). Hors thread principal, les appels Go pouvant bloquer.
+     */
+    fun onUnderlyingNetworkChanged(ctx: Context) {
+        val appCtx = ctx.applicationContext
+        val c = synchronized(lock) { if (thread?.isAlive == true) client else null } ?: return
+        networkExecutor.execute {
+            try {
+                val connected = Util.isConnected(appCtx)
+                c.setNetworkAvailable(connected)
+                if (connected) {
+                    c.notifyNetworkChange()
+                    c.onUpdatedHostDNS(underlyingDnsList(appCtx))
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "onUnderlyingNetworkChanged", e)
+            }
+        }
     }
 
     /** Serveurs DNS du reseau sous-jacent (hors VPN), sans l'adresse NetBird. */
@@ -398,6 +506,8 @@ object NetbirdEgress {
 
     /** Arret idempotent. Ne tient jamais le verrou en attendant le thread du moteur. */
     fun stop(stopSocketpair: () -> Unit) {
+        stopRequested = true
+        mainHandler.removeCallbacks(restartRunnable)
         val c: Client?
         val t: Thread?
         synchronized(lock) {

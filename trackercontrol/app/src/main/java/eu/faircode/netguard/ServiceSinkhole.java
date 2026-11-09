@@ -4130,6 +4130,7 @@ public class ServiceSinkhole extends VpnService {
             public void run() {
                 if (pendingWireGuardRestart.getAndSet(false))
                     net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.onUnderlyingNetworkChanged();
+                net.kollnig.missioncontrol.netbird.NetbirdEgress.INSTANCE.onUnderlyingNetworkChanged(ServiceSinkhole.this);
                 reload(reason, ServiceSinkhole.this, false);
             }
         }, NETWORK_RELOAD_TOKEN, SystemClock.uptimeMillis() + NETWORK_RELOAD_DEBOUNCE_MS);

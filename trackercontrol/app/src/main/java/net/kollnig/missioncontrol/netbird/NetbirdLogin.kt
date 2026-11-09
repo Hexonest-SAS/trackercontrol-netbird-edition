@@ -149,6 +149,7 @@ object NetbirdLogin {
         val dir = File(ctx.filesDir, "netbird")
         PreferenceManager.getDefaultSharedPreferences(ctx).edit()
             .putBoolean(NetbirdEgress.PREF_ENABLED, false).apply()
+        NetbirdEgress.cancelReloginNotification(ctx)
         try {
             ServiceSinkhole.reload("netbird logout", ctx, false)
         } catch (e: Throwable) {

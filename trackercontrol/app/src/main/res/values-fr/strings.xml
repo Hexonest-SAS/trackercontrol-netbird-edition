@@ -743,4 +743,6 @@ Cordialement,\n\n]]></string>
     <string name="vpn_netbird_peer_connecting">connexion</string>
     <string name="vpn_netbird_peer_idle">inactif</string>
     <string name="vpn_netbird_peer_relayed">relais</string>
+    <string name="msg_netbird_relogin_title">NetBird : reconnexion nécessaire</string>
+    <string name="msg_netbird_relogin_detail">Ouvrez Réglages → NetBird pour vous reconnecter</string>
 </resources>
