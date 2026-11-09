@@ -42,7 +42,6 @@ public class VpnRoutes {
     private static final String[][] ALWAYS_EXCLUDED = {
             // Reserved ranges
             {"0.0.0.0", "8"},       // Current network (RFC 1122)
-            {"100.64.0.0", "10"},   // CGNAT (RFC 6598)
             {"127.0.0.0", "8"},     // Loopback (RFC 1122)
             {"169.254.0.0", "16"},  // Link-local (RFC 3927)
             {"224.0.0.0", "3"},     // Multicast (224/4) + reserved (240/4)
@@ -64,6 +63,13 @@ public class VpnRoutes {
             {"97.128.0.0", "9"},    // 97.128.0.0  - 97.255.255.255
             {"174.192.0.0", "10"},  // 174.192.0.0 - 174.255.255.255
     };
+
+    // Shared address space (CGNAT, RFC 6598). Excluded by default because it
+    // belongs to the carrier, but overlays such as NetBird and Tailscale assign
+    // their addresses inside it: the part covered by a tunnel route at least as
+    // specific as the range itself enters the tunnel. A broader route (a full
+    // tunnel's 0.0.0.0/0) does not pull the carrier's space in.
+    private static final String[] CGNAT_RANGE = {"100.64.0.0", "10"};
 
     // RFC 1918 private ranges. Excluded by default so LAN traffic bypasses the
     // tunnel, but included (routed into the tunnel) for the portion covered by
@@ -143,6 +149,14 @@ public class VpnRoutes {
             long[] interval = toInterval(range[0], Integer.parseInt(range[1]));
             excluded.addAll(subtract(interval[0], interval[1], allowed));
         }
+
+        int cgnatPrefix = Integer.parseInt(CGNAT_RANGE[1]);
+        List<long[]> specific = new ArrayList<>();
+        for (IPUtil.CIDR cidr : allowedV4)
+            if (cidr.prefix >= cgnatPrefix)
+                specific.add(new long[]{inetToLong(cidr.getStart()), inetToLong(cidr.getEnd())});
+        long[] cgnat = toInterval(CGNAT_RANGE[0], cgnatPrefix);
+        excluded.addAll(subtract(cgnat[0], cgnat[1], specific));
 
         excluded.sort((a, b) -> Long.compare(a[0], b[0]));
 

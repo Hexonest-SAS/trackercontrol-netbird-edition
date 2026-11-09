@@ -224,6 +224,35 @@ public class VpnRoutesTest {
     }
 
     @Test
+    public void overlayRangeInsideCgnatIsRoutedButRestOfCgnatIsNot() throws Exception {
+        // NetBird (and Tailscale-style) overlays live inside 100.64.0.0/10. The
+        // range the tunnel announces must enter the VPN; the rest of CGNAT,
+        // which belongs to the carrier, keeps bypassing it.
+        List<IPUtil.CIDR> routes = VpnRoutes.getRoutes(
+                Arrays.asList("100.102.0.0/16", "10.20.0.0/24"));
+
+        assertTrue(isRouted(routes, "100.102.79.78"));
+        assertTrue(isRouted(routes, "100.102.0.1"));
+        assertTrue(isRouted(routes, "10.20.0.5"));
+        assertTrue(isRouted(routes, "8.8.8.8"));
+
+        assertFalse(isRouted(routes, "100.64.0.1"));
+        assertFalse(isRouted(routes, "100.103.0.1"));
+        assertFalse(isRouted(routes, "100.127.255.254"));
+        assertFalse(isRouted(routes, "10.21.0.5"));
+        assertFalse(isRouted(routes, "192.168.1.10"));
+    }
+
+    @Test
+    public void cgnatOnlyCarvedBySpecificRoutesNotBroadOnes() throws Exception {
+        // A route broader than /10 (e.g. a full tunnel's 0.0.0.0/0 or 64.0.0.0/2)
+        // does not pull the carrier's CGNAT space into the tunnel.
+        List<IPUtil.CIDR> routes = VpnRoutes.getRoutes(Collections.singletonList("64.0.0.0/2"));
+        assertFalse(isRouted(routes, "100.102.79.78"));
+        assertTrue(isRouted(routes, "64.0.0.1"));
+    }
+
+    @Test
     public void allowedIpsNeverReExposeReservedRanges() throws Exception {
         // A profile that lists loopback/link-local must not route them.
         List<IPUtil.CIDR> routes = VpnRoutes.getRoutes(

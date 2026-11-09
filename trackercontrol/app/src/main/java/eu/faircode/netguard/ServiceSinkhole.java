@@ -2078,6 +2078,23 @@ public class ServiceSinkhole extends VpnService {
         Log.i(TAG, "IPv6=" + ip6);
         if (ip6)
             builder.addRoute("2000::", 3); // unicast
+        // NetBird's IPv6 overlay is a ULA range (fd00::/8), outside 2000::/3: add
+        // its routes explicitly. A ::/0 route (exit node) adds nothing over 2000::/3.
+        if (ip6 && nbActive)
+            for (String route : nbRoutes) {
+                String[] parts = route.trim().split("/");
+                if (!parts[0].contains(":") || parts.length != 2)
+                    continue;
+                try {
+                    int prefix = Integer.parseInt(parts[1]);
+                    if (prefix > 0 && Util.isNumericAddress(parts[0])) {
+                        builder.addRoute(parts[0], prefix);
+                        Log.i(TAG, "NetBird IPv6 route " + parts[0] + "/" + prefix);
+                    }
+                } catch (Throwable ex) {
+                    Log.e(TAG, "NetBird IPv6 route " + route + ": " + ex);
+                }
+            }
 
         // MTU
         int mtu = jni_get_mtu();
