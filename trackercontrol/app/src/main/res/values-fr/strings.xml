@@ -747,4 +747,5 @@ Cordialement,\n\n]]></string>
     <string name="vpn_netbird_peer_relayed">relais</string>
     <string name="msg_netbird_relogin_title">NetBird : reconnexion nécessaire</string>
     <string name="msg_netbird_relogin_detail">Ouvrez Réglages → NetBird pour vous reconnecter</string>
+    <string name="app_fork_notice">TrackerControl NetBird Edition est un fork non officiel de TrackerControl qui embarque le client NetBird. Il n\'est ni affilié aux projets TrackerControl et NetBird, ni approuvé par eux.\n\nLicence : GNU GPLv3 pour l\'ensemble de l\'œuvre. Les mentions de licence d\'origine sont conservées : TrackerControl est sous GPLv3, le client NetBird sous BSD-3-Clause.\n\nCode source : <a href="https://github.com/Hexonest-SAS/trackercontrol-netbird-edition">https://github.com/Hexonest-SAS/trackercontrol-netbird-edition</a></string>
 </resources>

@@ -1614,6 +1614,7 @@ public class ActivityMain extends AppCompatActivity implements SharedPreferences
         TextView tvEula = view.findViewById(R.id.tvEula);
         TextView tvPrivacy = view.findViewById(R.id.tvPrivacy);
         TextView tvIos = view.findViewById(R.id.tvIos);
+        TextView tvFork = view.findViewById(R.id.tvFork);
 
         // Show version
         tvVersionName.setText(Util.getSelfVersionName(this));
@@ -1623,6 +1624,7 @@ public class ActivityMain extends AppCompatActivity implements SharedPreferences
         tvEula.setMovementMethod(LinkMovementMethod.getInstance());
         tvPrivacy.setMovementMethod(LinkMovementMethod.getInstance());
         tvIos.setMovementMethod(LinkMovementMethod.getInstance());
+        tvFork.setMovementMethod(LinkMovementMethod.getInstance());
 
         // Handle rate
         btnRate.setVisibility(

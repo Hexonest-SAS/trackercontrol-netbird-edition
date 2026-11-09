@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name" translatable="false">TrackerControl NetBird</string>
+    <string name="app_name" translatable="false">TrackerControl NetBird Edition</string>
     <string name="app_name_short" translatable="false">TC NetBird</string>
     <string name="control_trackers">Control Trackers</string>
 </resources>

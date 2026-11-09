@@ -895,4 +895,5 @@ Sincerely,\n\n]]></string>
     <string name="vpn_netbird_peer_relayed">relay</string>
     <string name="msg_netbird_relogin_title">NetBird: sign-in required</string>
     <string name="msg_netbird_relogin_detail">Open Settings → NetBird to sign in again</string>
+    <string name="app_fork_notice">TrackerControl NetBird Edition is an unofficial fork of TrackerControl that embeds the NetBird client. It is not affiliated with, nor endorsed by, the TrackerControl or NetBird projects.\n\nLicence: GNU GPLv3 for the whole work. The original licence notices are kept: TrackerControl is GPLv3, the NetBird client is BSD-3-Clause.\n\nSource code: <a href="https://github.com/Hexonest-SAS/trackercontrol-netbird-edition">https://github.com/Hexonest-SAS/trackercontrol-netbird-edition</a></string>
 </resources>

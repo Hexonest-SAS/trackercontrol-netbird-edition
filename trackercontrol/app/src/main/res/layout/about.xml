@@ -117,6 +117,15 @@
                 android:text="@string/app_ios"
                 android:textAppearance="@style/TextSmall"
                 android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tvFork"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/app_fork_notice"
+                android:textAppearance="@style/TextSmall"
+                android:textSize="12sp" />
         </LinearLayout>
     </ScrollView>
 </LinearLayout>

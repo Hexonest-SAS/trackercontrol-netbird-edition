@@ -1,11 +1,29 @@
-# TrackerControl + NetBird
+# TrackerControl NetBird Edition
 
-Fork personnel de [TrackerControl](https://github.com/TrackerControl/tracker-control-android)
-(GPLv3) qui embarque le moteur du client [NetBird](https://github.com/netbirdio/netbird) (BSD-3)
-à la place de son pont WireGuard : un seul VPN Android qui filtre les traqueurs et rejoint le
-réseau NetBird. Usage personnel, rien n'est publié (voir `CLAUDE.md`).
+> **Fork non officiel.** Ce projet n'a aucun lien avec les projets TrackerControl ni NetBird et
+> n'est pas approuvé par eux. « TrackerControl » et « NetBird » désignent leurs projets d'origine ;
+> ils sont cités uniquement pour indiquer la provenance du code.
 
-Licence de l'ensemble : GPLv3 (celle de TrackerControl ; le code NetBird garde sa licence BSD-3).
+Fork de [TrackerControl](https://github.com/TrackerControl/tracker-control-android) (GPLv3) qui
+embarque le moteur du client [NetBird](https://github.com/netbirdio/netbird) (BSD-3) à la place de
+son pont WireGuard : un seul VPN Android qui filtre les traqueurs et rejoint un réseau NetBird
+(pairs, DNS et politiques NetBird).
+
+Code source : https://github.com/Hexonest-SAS/trackercontrol-netbird-edition
+
+## Licence et modifications
+
+Cette œuvre est une version modifiée de TrackerControl et du client NetBird, distribuée sous la
+licence **GNU GPLv3** pour l'ensemble (GPLv3 §5).
+
+- **Modifications signalées** : toutes les modifications des sources en amont sont isolées dans des
+  commits préfixés `trackercontrol:` ou `netbird:`. Les lister avec
+  `git log -- trackercontrol/ netbird/` (ou `git log --oneline -- netbird/` par composant).
+- **Date de début des modifications** : 2026-11-09.
+- **TrackerControl** : GPLv3, notices et droits d'auteur d'origine conservés.
+- **Client NetBird** : licence BSD-3-Clause, conservée avec sa notice (voir `netbird/LICENSE`) ;
+  elle reste applicable à ce code, qui est redistribué dans l'ensemble sous GPLv3.
+- Aucune garantie, dans la mesure permise par la loi (voir le texte de la GPLv3).
 
 ## Structure
 
@@ -60,27 +78,28 @@ echo "sdk.dir=$HOME/Android/Sdk" > local.properties
 # APK : app/build/outputs/apk/fdroid/debug/
 ```
 
-## Installer sur le téléphone
+## Installer
 
-Signature : clé de debug de la machine de build (`~/.android/debug.keystore`, alias
-`androiddebugkey`, SHA-256 `dd2dcbbf…ef1fb1`). Décision D6 de la roadmap : on reste sur cette clé tant que
-l'app ne quitte pas le téléphone de Fabien. **Sauvegarder ce fichier** : sans lui, plus aucune
-mise à jour sur place n'est possible (Android refuse une signature différente).
+Android n'autorise qu'un seul VPN actif à la fois : cette application remplace d'autres clients
+VPN (dont l'application NetBird officielle). Installer l'APK produit (par exemple avec
+`adb install -r <apk>`), ouvrir l'application, accepter la demande d'autorisation VPN, puis
+ouvrir l'onglet VPN pour se connecter à son serveur de gestion NetBird (URL du serveur, clé
+d'installation ou connexion). Les services du réseau NetBird sont ensuite joignables par leur
+adresse d'overlay ou leur nom DNS NetBird.
 
-```sh
-# APK : build/apk/TrackerControl-NetBird-<commit>-debug.apk (copie de
-# trackercontrol/app/build/outputs/apk/fdroid/debug/TrackerControl-fdroidDebug-latest.apk)
-adb -s <téléphone> install -r build/apk/TrackerControl-NetBird-<commit>-debug.apk
-```
+### Mettre à jour sans créer de nouveau pair
 
-- Toujours `install -r` (mise à jour sur place) : les données de l'app sont conservées, donc la
-  configuration NetBird (`files/netbird/netbird.cfg`) et sa clé WireGuard : le téléphone reste le
-  même pair NetBird. Ne jamais désinstaller ni `pm clear` : une nouvelle installation crée un
-  nouveau pair (doublon à supprimer dans l'interface NetBird).
-- Paquet : `fr.hexonest.trackernetbird.fdroid.test` (« TrackerControl NetBird »), installable à
-  côté de TrackerControl ; un seul VPN actif à la fois sous Android.
-- Vérification après mise à jour : `adb shell ip route get 100.102.79.78 uid <uid d'une app>`
-  doit passer par `tun*` avec l'adresse NetBird en source (le shell adb et l'app elle-même sont
-  exclus du VPN : leurs propres tests réseau ne prouvent rien).
-- Se connecter par SSO avec le VPN de l'app activé : sinon Android peut geler l'app pendant que
-  le navigateur est au premier plan et le retour de connexion échoue.
+- Les APK de développement sont signés avec la clé de debug de la machine de build
+  (`~/.android/debug.keystore`). Android refuse une mise à jour signée par une autre clé :
+  conserver ce fichier pour pouvoir mettre à jour sur place.
+- Toujours mettre à jour sur place (`adb install -r`) : les données de l'app, donc la
+  configuration NetBird (`files/netbird/netbird.cfg`) et sa clé WireGuard, sont conservées et
+  l'appareil reste le même pair. Désinstaller ou effacer les données crée un nouveau pair
+  (doublon à supprimer dans l'interface NetBird).
+- Paquet de développement : `fr.hexonest.trackernetbird.fdroid.test` (« TrackerControl NetBird
+  Edition »), installable à côté de TrackerControl.
+- Vérifier le routage après une mise à jour : `adb shell ip route get <IP d'un pair> uid <uid
+  d'une app>` doit passer par `tun*` avec l'adresse NetBird en source. Le shell adb et
+  l'application elle-même sont exclus du VPN : leurs propres tests réseau ne prouvent rien.
+- Se connecter par SSO avec le VPN de l'application activé : sinon Android peut geler
+  l'application pendant que le navigateur est au premier plan, et le retour de connexion échoue.
