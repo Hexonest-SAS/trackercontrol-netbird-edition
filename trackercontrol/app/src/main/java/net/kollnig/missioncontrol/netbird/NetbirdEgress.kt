@@ -153,6 +153,15 @@ object NetbirdEgress {
         }
     }
 
+    /**
+     * Crée le client une fois. NewClient installe la protection des sockets du moteur : sans
+     * elle, Auth (connexion par clé ou SSO) ne peut pas joindre le serveur de management.
+     */
+    @JvmStatic
+    fun ensureClient(ctx: Context) {
+        synchronized(lock) { if (client == null) client = createClient(ctx.applicationContext) }
+    }
+
     private fun dupTun(pfd: ParcelFileDescriptor): Int =
         ParcelFileDescriptor.dup(pfd.fileDescriptor).detachFd()
 

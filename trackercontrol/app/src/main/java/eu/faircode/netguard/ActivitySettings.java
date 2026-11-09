@@ -1118,11 +1118,10 @@ public class ActivitySettings extends AppCompatActivity implements SharedPrefere
     }
 
     private CharSequence getNetbirdStatusSummary(SharedPreferences prefs) {
-        if (!prefs.getBoolean(net.kollnig.missioncontrol.netbird.NetbirdEgress.PREF_ENABLED, false)) {
-            return new File(new File(getFilesDir(), "netbird"), "netbird.cfg").exists()
-                    ? getString(R.string.summary_netbird_status_off)
-                    : getString(R.string.summary_netbird_status_unconfigured);
-        }
+        if (!net.kollnig.missioncontrol.netbird.NetbirdEgress.INSTANCE.configFile(this).exists())
+            return getString(R.string.summary_netbird_status_unconfigured);
+        if (!prefs.getBoolean(net.kollnig.missioncontrol.netbird.NetbirdEgress.PREF_ENABLED, false))
+            return getString(R.string.summary_netbird_status_off);
         String error = net.kollnig.missioncontrol.netbird.NetbirdEgress.INSTANCE.getLastError();
         if (!TextUtils.isEmpty(error))
             return getString(R.string.summary_netbird_status_error, error);

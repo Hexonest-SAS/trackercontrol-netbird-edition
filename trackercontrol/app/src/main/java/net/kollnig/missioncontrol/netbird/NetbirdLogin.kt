@@ -52,11 +52,22 @@ object NetbirdLogin {
         }
     }
 
-    private fun listener(ctx: Context): ErrListener {
+    /**
+     * Auth écrit netbird.cfg avant même de joindre le management : si la connexion échoue et
+     * qu'aucune configuration n'existait avant, on la supprime pour ne pas la prendre pour un
+     * enregistrement valide.
+     */
+    private fun dropUnregisteredConfig(cfg: File, existedBefore: Boolean) {
+        if (!existedBefore && cfg.exists() && !cfg.delete())
+            Log.w(TAG, "could not delete unregistered netbird.cfg")
+    }
+
+    private fun listener(ctx: Context, cfg: File, existedBefore: Boolean): ErrListener {
         val done = AtomicBoolean(false)
         return object : ErrListener {
             override fun onError(e: Exception) {
                 if (!done.compareAndSet(false, true)) return
+                dropUnregisteredConfig(cfg, existedBefore)
                 Log.w(TAG, "login failed: ${e.javaClass.simpleName}")
                 toast(ctx, ctx.getString(R.string.msg_netbird_login_failed, e.message ?: e.javaClass.simpleName))
             }
@@ -72,11 +83,15 @@ object NetbirdLogin {
         val key = setupKey.trim()
         if (key.isEmpty()) return
         val url = managementUrl(ctx)
-        val cfg = File(netbirdDir(ctx), "netbird.cfg").absolutePath
+        val cfg = File(netbirdDir(ctx), "netbird.cfg")
+        val existed = cfg.exists()
         Thread({
             try {
-                Auth(cfg, url, null).loginWithSetupKeyAndSaveConfig(listener(ctx), key, Build.MODEL ?: "android")
+                NetbirdEgress.ensureClient(ctx)
+                Auth(cfg.absolutePath, url, null)
+                    .loginWithSetupKeyAndSaveConfig(listener(ctx, cfg, existed), key, Build.MODEL ?: "android")
             } catch (e: Throwable) {
+                dropUnregisteredConfig(cfg, existed)
                 Log.w(TAG, "setup key login failed: ${e.javaClass.simpleName}")
                 toast(ctx, ctx.getString(R.string.msg_netbird_login_failed, e.message ?: e.javaClass.simpleName))
             }
@@ -86,7 +101,8 @@ object NetbirdLogin {
     fun loginWithSso(context: Context) {
         val ctx = context.applicationContext
         val url = managementUrl(ctx)
-        val cfg = File(netbirdDir(ctx), "netbird.cfg").absolutePath
+        val cfg = File(netbirdDir(ctx), "netbird.cfg")
+        val existed = cfg.exists()
         val opener = object : URLOpener {
             override fun open(url: String, userCode: String) {
                 ui.post {
@@ -106,8 +122,10 @@ object NetbirdLogin {
         }
         Thread({
             try {
-                Auth(cfg, url, null).login(listener(ctx), opener, false)
+                NetbirdEgress.ensureClient(ctx)
+                Auth(cfg.absolutePath, url, null).login(listener(ctx, cfg, existed), opener, false)
             } catch (e: Throwable) {
+                dropUnregisteredConfig(cfg, existed)
                 Log.w(TAG, "sso login failed: ${e.javaClass.simpleName}")
                 toast(ctx, ctx.getString(R.string.msg_netbird_login_failed, e.message ?: e.javaClass.simpleName))
             }
