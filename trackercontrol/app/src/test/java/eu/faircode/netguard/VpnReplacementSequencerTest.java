@@ -1,0 +1,139 @@
+package eu.faircode.netguard;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
+
+import org.junit.Test;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+public class VpnReplacementSequencerTest {
+    @Test
+    public void activatesBlockingTunnelBeforeStoppingPreviousTunnel() {
+        List<String> events = new ArrayList<>();
+
+        String result = VpnReplacementSequencer.replace(
+                "previous",
+                () -> {
+                    events.add("establish blocking");
+                    return "blocking";
+                },
+                () -> {
+                    events.add("establish replacement");
+                    return "replacement";
+                },
+                value -> events.add("activate " + value),
+                value -> events.add("stop " + value),
+                value -> events.add("close " + value));
+
+        assertEquals("replacement", result);
+        assertEquals(Arrays.asList(
+                "establish blocking",
+                "activate blocking",
+                "stop previous",
+                "close previous",
+                "establish replacement",
+                "activate replacement",
+                "close blocking"), events);
+    }
+
+    @Test
+    public void blockingEstablishmentFailureLeavesPreviousTunnelUntouched() {
+        List<String> events = new ArrayList<>();
+
+        assertThrows(VpnReplacementSequencer.EstablishFailedException.class,
+                () -> VpnReplacementSequencer.replace(
+                        "previous",
+                        () -> null,
+                        () -> "replacement",
+                        value -> events.add("activate " + value),
+                        value -> events.add("stop " + value),
+                        value -> events.add("close " + value)));
+
+        assertEquals(0, events.size());
+    }
+
+    @Test
+    public void replacementFailureKeepsBlockingTunnelActive() {
+        List<String> active = new ArrayList<>();
+        List<String> closed = new ArrayList<>();
+
+        assertThrows(VpnReplacementSequencer.EstablishFailedException.class,
+                () -> VpnReplacementSequencer.replace(
+                        "previous",
+                        () -> "blocking",
+                        () -> null,
+                        active::add,
+                        value -> { },
+                        closed::add));
+
+        assertEquals(1, active.size());
+        assertEquals("blocking", active.get(0));
+        assertEquals(Arrays.asList("previous"), closed);
+        assertFalse(closed.contains("blocking"));
+    }
+
+    @Test
+    public void failedReplacementCanRetryAndSuccessResetsBudget() {
+        List<String> closed = new ArrayList<>();
+        int[] replacementAttempts = {0};
+        FailureRecoveryPolicy policy = new FailureRecoveryPolicy(2, 1_000L, 120_000L);
+
+        VpnReplacementSequencer.EstablishFailedException failure = assertThrows(
+                VpnReplacementSequencer.EstablishFailedException.class,
+                () -> VpnReplacementSequencer.replace(
+                        "previous",
+                        () -> "blocking",
+                        () -> {
+                            replacementAttempts[0]++;
+                            return null;
+                        },
+                        value -> { },
+                        value -> { },
+                        closed::add));
+
+        assertTrue(failure.isReplacementFailure());
+        assertEquals(Arrays.asList("previous"), closed);
+        assertEquals(1_000L, policy.onFailure(0L));
+
+        String result = VpnReplacementSequencer.replace(
+                "blocking",
+                () -> "blocking retry",
+                () -> {
+                    replacementAttempts[0]++;
+                    return "replacement";
+                },
+                value -> { },
+                value -> { },
+                closed::add);
+
+        assertEquals("replacement", result);
+        assertEquals(2, replacementAttempts[0]);
+        policy.reset();
+        assertEquals(1_000L, policy.onFailure(1L));
+    }
+
+    @Test
+    public void previousStopFailureLeavesBlockingTunnelActive() {
+        List<String> active = new ArrayList<>();
+        List<String> closed = new ArrayList<>();
+
+        assertThrows(IllegalStateException.class,
+                () -> VpnReplacementSequencer.replace(
+                        "previous",
+                        () -> "blocking",
+                        () -> "replacement",
+                        active::add,
+                        value -> {
+                            throw new IllegalStateException("stop failed");
+                        },
+                        closed::add));
+
+        assertEquals(Arrays.asList("blocking"), active);
+        assertEquals(0, closed.size());
+    }
+}

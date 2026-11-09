@@ -1,0 +1,553 @@
+package net.kollnig.missioncontrol.wg;
+
+import android.text.TextUtils;
+
+import net.kollnig.missioncontrol.wgbridge.Wgbridge;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.IOException;
+import java.security.SecureRandom;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+
+public class MullvadProfileGenerator {
+    private static final String API = "https://api.mullvad.net";
+    private static final MediaType JSON = MediaType.parse("application/json");
+    private static final String DEFAULT_DNS = "10.64.0.1, fc00:bbbb:bbbb:bb01::1";
+    private static final int DEFAULT_PORT = 51820;
+
+    private final OkHttpClient client = new OkHttpClient();
+    private final SecureRandom random = new SecureRandom();
+
+    public static class CountryOption {
+        public final String code;
+        public final String name;
+
+        public CountryOption(String code, String name) {
+            this.code = code;
+            this.name = name;
+        }
+
+        @Override
+        public String toString() {
+            return name;
+        }
+    }
+
+    public static class GeneratedProfile {
+        public final String name;
+        public final String config;
+        public final String accountNumber;
+        public final String countryCode;
+        public final String countryName;
+        public final String relayHostname;
+        public final String deviceId;
+        public final String privateKey;
+        public final String address;
+        /**
+         * True when the saved identity could not be reused and a fresh Mullvad
+         * device was registered. Callers must then rewrite the account's other
+         * profiles, which still carry the identity Mullvad no longer knows.
+         */
+        public final boolean identityReplaced;
+
+        public GeneratedProfile(String name, String config, String accountNumber,
+                                String countryCode, String countryName, String relayHostname,
+                                String deviceId, String privateKey, String address,
+                                boolean identityReplaced) {
+            this.name = name;
+            this.config = config;
+            this.accountNumber = accountNumber;
+            this.countryCode = normalizeCountry(countryCode);
+            this.countryName = countryName == null ? "" : countryName;
+            this.relayHostname = relayHostname == null ? "" : relayHostname;
+            this.deviceId = deviceId == null ? "" : deviceId;
+            this.privateKey = privateKey == null ? "" : privateKey;
+            this.address = address == null ? "" : address;
+            this.identityReplaced = identityReplaced;
+        }
+    }
+
+    public static class ApiRejectedException extends IOException {
+        ApiRejectedException(String message) {
+            super(message);
+        }
+
+        public boolean isPublicKeyInUse() {
+            String message = getMessage();
+            return message != null && message.contains("PUBKEY_IN_USE");
+        }
+    }
+
+    /**
+     * The account has no time left. Mullvad still authenticates such an
+     * account and still lists its devices, but no relay will complete a
+     * handshake for it — so every other identity check passes while the
+     * tunnel stays down until the user adds time.
+     */
+    public static class AccountExpiredException extends ApiRejectedException {
+        AccountExpiredException(String message) {
+            super(message);
+        }
+    }
+
+    // Package-private so tests can supply relay data without making HTTP calls.
+    static class Relay {
+        String hostname;
+        String countryCode;
+        String countryName;
+        String provider;
+        String ipv4;
+        String publicKey;
+        int speed;
+        boolean stboot;
+    }
+
+    public List<CountryOption> fetchCountryOptions() throws Exception {
+        Map<String, String> countries = new LinkedHashMap<>();
+        for (Relay relay : fetchRelays()) {
+            countries.put(relay.countryCode, relay.countryName);
+        }
+
+        List<CountryOption> options = new ArrayList<>();
+        for (Map.Entry<String, String> entry : countries.entrySet())
+            options.add(new CountryOption(entry.getKey(), entry.getValue()));
+        Collections.sort(options, Comparator.comparing(o -> o.name));
+        return options;
+    }
+
+    public GeneratedProfile generate(String accountNumber, String requestedCountryCode) throws Exception {
+        return generate(accountNumber, requestedCountryCode, null);
+    }
+
+    public GeneratedProfile generate(String accountNumber, String requestedCountryCode, String reusableConfig) throws Exception {
+        return generate(accountNumber, requestedCountryCode, reusableConfig, null, false);
+    }
+
+    public GeneratedProfile generate(String accountNumber, String requestedCountryCode, String reusableConfig,
+                                     String excludeHostname) throws Exception {
+        return generate(accountNumber, requestedCountryCode, reusableConfig, excludeHostname, false);
+    }
+
+    /**
+     * @param excludeHostname          a relay hostname to avoid re-picking when another
+     *                                 candidate is available in the chosen pool, e.g. a
+     *                                 relay a caller just failed over away from.
+     * @param verifyReusableIdentity   ask Mullvad whether the saved identity is still
+     *                                 registered before reusing it, and register a fresh
+     *                                 device when it is not. Only for callers that already
+     *                                 know the tunnel does not work: the handshake is the
+     *                                 authoritative test, and it needs nothing but the
+     *                                 relay endpoint, while this asks an API host that a
+     *                                 working tunnel never has to reach.
+     */
+    public GeneratedProfile generate(String accountNumber, String requestedCountryCode, String reusableConfig,
+                                     String excludeHostname, boolean verifyReusableIdentity) throws Exception {
+        String account = accountNumber == null ? "" : accountNumber.trim();
+        if (account.isEmpty())
+            throw new IllegalArgumentException("Mullvad account number is required");
+
+        WgConfig reusable = parseReusableConfig(reusableConfig);
+        Relay relay = chooseRelay(fetchRelays(), requestedCountryCode, excludeHostname);
+        String privateKey;
+        JSONObject device;
+        boolean identityReplaced = false;
+        if (reusable == null) {
+            privateKey = newPrivateKey();
+            String publicKey = derivePublicKey(privateKey);
+            String token = fetchWebToken(account);
+            device = createDevice(token, publicKey);
+        } else if (!verifyReusableIdentity) {
+            privateKey = reusable.getPrivateKey();
+            device = deviceFromConfig(reusable);
+        } else {
+            // The caller has already established that this identity does not
+            // work. A saved identity is only usable while Mullvad still knows
+            // it — once the device is deleted from the account, its key never
+            // completes a handshake — so ask, and register a fresh device
+            // rather than inheriting the dead identity.
+            String token = fetchWebToken(account);
+            // Ask about the subscription before the identity. An account with
+            // no time left authenticates and keeps its devices registered, so
+            // every check below would pass and the caller would keep cycling
+            // relays forever against servers that will never answer.
+            requireAccountTime(token);
+            JSONObject registered = findDevice(token, publicKeyOf(reusable.getPrivateKey()));
+            if (registered == null) {
+                privateKey = newPrivateKey();
+                device = createDevice(token, derivePublicKey(privateKey));
+                identityReplaced = true;
+            } else {
+                privateKey = reusable.getPrivateKey();
+                device = deviceForReuse(registered, reusable);
+            }
+        }
+        String config = buildConfig(privateKey, device, relay);
+        return new GeneratedProfile("Mullvad - " + relay.countryName, config, account,
+                relay.countryCode, relay.countryName, relay.hostname, device.optString("id", ""),
+                privateKey, addressOf(device), identityReplaced);
+    }
+
+    public String findDeviceIdForPubkey(String accountNumber, String publicKey) throws Exception {
+        if (TextUtils.isEmpty(publicKey))
+            return "";
+        String token = fetchWebToken(accountNumber);
+        for (JSONObject device : listDevices(token))
+            if (publicKey.equals(device.optString("pubkey")))
+                return device.optString("id", "");
+        return "";
+    }
+
+    public boolean deviceHasPubkey(String accountNumber, String deviceId, String publicKey)
+            throws Exception {
+        if (TextUtils.isEmpty(deviceId) || TextUtils.isEmpty(publicKey))
+            return false;
+        String token = fetchWebToken(accountNumber);
+        for (JSONObject device : listDevices(token))
+            if (deviceId.equals(device.optString("id")))
+                return publicKey.equals(device.optString("pubkey"));
+        return false;
+    }
+
+    public void rotateDevicePubkey(String accountNumber, String deviceId, String publicKey)
+            throws Exception {
+        if (TextUtils.isEmpty(deviceId))
+            throw new IllegalArgumentException("Mullvad device id is required");
+        if (TextUtils.isEmpty(publicKey))
+            throw new IllegalArgumentException("Mullvad public key is required");
+
+        String token = fetchWebToken(accountNumber);
+        JSONObject body = new JSONObject();
+        body.put("pubkey", publicKey);
+        JSONObject device = requestJson("PUT",
+                API + "/accounts/v1/devices/" + deviceId + "/pubkey", token, body);
+        if (!publicKey.equals(device.optString("pubkey", "")))
+            throw new IOException("Mullvad did not confirm the new public key");
+    }
+
+    private WgConfig parseReusableConfig(String reusableConfig) {
+        if (TextUtils.isEmpty(reusableConfig))
+            return null;
+        try {
+            WgConfig config = WgConfigParser.INSTANCE.parse(reusableConfig);
+            if (config.getAddress().isEmpty())
+                return null;
+            return config;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private String publicKeyOf(String privateKey) {
+        if (TextUtils.isEmpty(privateKey))
+            return "";
+        try {
+            String publicKey = derivePublicKey(privateKey);
+            return publicKey == null ? "" : publicKey;
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    private JSONObject findDevice(String token, String publicKey) throws Exception {
+        if (TextUtils.isEmpty(publicKey))
+            return null;
+        for (JSONObject device : listDevices(token))
+            if (publicKey.equals(device.optString("pubkey")))
+                return device;
+        return null;
+    }
+
+    /**
+     * The account's device record is authoritative for the tunnel addresses;
+     * the saved config only fills in what the record does not carry.
+     */
+    private JSONObject deviceForReuse(JSONObject registered, WgConfig config) throws Exception {
+        if (TextUtils.isEmpty(registered.optString("ipv4_address")) &&
+                TextUtils.isEmpty(registered.optString("ipv6_address"))) {
+            JSONObject device = deviceFromConfig(config);
+            device.put("id", registered.optString("id", ""));
+            if (!TextUtils.isEmpty(registered.optString("name")))
+                device.put("name", registered.optString("name"));
+            return device;
+        }
+        return registered;
+    }
+
+    private JSONObject deviceFromConfig(WgConfig config) throws Exception {
+        JSONObject device = new JSONObject();
+        for (String address : config.getAddress()) {
+            String ip = address.trim();
+            if (ip.contains(":"))
+                device.put("ipv6_address", ip);
+            else
+                device.put("ipv4_address", ip);
+        }
+        if (TextUtils.isEmpty(device.optString("ipv4_address")) &&
+                TextUtils.isEmpty(device.optString("ipv6_address")))
+            throw new IllegalArgumentException("Reusable Mullvad profile has no interface address");
+        device.put("name", "existing");
+        return device;
+    }
+
+    // Package-private seams keep generator tests independent of the native library and HTTP.
+    String newPrivateKey() {
+        return Wgbridge.generatePrivateKey();
+    }
+
+    String derivePublicKey(String privateKey) {
+        return Wgbridge.publicKey(privateKey);
+    }
+
+    String fetchWebToken(String accountNumber) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("account_number", accountNumber);
+
+        JSONObject response = postJson(API + "/auth/v1/webtoken", null, body);
+        String token = response.optString("access_token", "");
+        if (token.isEmpty())
+            throw new IOException("Mullvad did not return an access token");
+        return token;
+    }
+
+    JSONObject createDevice(String token, String publicKey) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("pubkey", publicKey);
+        body.put("hijack_dns", false);
+        return postJson(API + "/accounts/v1/devices", token, body);
+    }
+
+    /**
+     * The account's expiry in epoch milliseconds, or {@link Long#MAX_VALUE}
+     * when Mullvad did not say. Unknown counts as "has time": telling a paying
+     * user their subscription has lapsed because a field moved is worse than
+     * falling back to the generic unresponsive-tunnel message.
+     */
+    // Package-private so tests can supply an expiry without making HTTP calls.
+    long fetchAccountExpiry(String token) throws Exception {
+        Request.Builder builder = new Request.Builder()
+                .url(API + "/accounts/v1/accounts/me");
+        if (!TextUtils.isEmpty(token))
+            builder.header("Authorization", "Bearer " + token);
+
+        try (Response response = client.newCall(builder.build()).execute()) {
+            String text = responseText(response);
+            if (!response.isSuccessful())
+                throw new IOException("Mullvad account request failed: " + response.code()
+                        + " " + text);
+            return parseExpiry(new JSONObject(text).optString("expiry", ""));
+        }
+    }
+
+    /** Parses Mullvad's RFC 3339 {@code expiry}; unparseable means unknown. */
+    static long parseExpiry(String expiry) {
+        if (TextUtils.isEmpty(expiry))
+            return Long.MAX_VALUE;
+        try {
+            return OffsetDateTime.parse(expiry).toInstant().toEpochMilli();
+        } catch (RuntimeException ex) {
+            return Long.MAX_VALUE;
+        }
+    }
+
+    private void requireAccountTime(String token) throws Exception {
+        if (fetchAccountExpiry(token) <= System.currentTimeMillis())
+            throw new AccountExpiredException("Mullvad account has no time left");
+    }
+
+    // Package-private so tests can supply device data without making HTTP calls.
+    List<JSONObject> listDevices(String token) throws Exception {
+        Request.Builder builder = new Request.Builder()
+                .url(API + "/accounts/v1/devices");
+        if (!TextUtils.isEmpty(token))
+            builder.header("Authorization", "Bearer " + token);
+
+        try (Response response = client.newCall(builder.build()).execute()) {
+            String text = responseText(response);
+            if (!response.isSuccessful())
+                throw new IOException("Mullvad devices request failed: " + response.code() + " " + text);
+            JSONArray array = new JSONArray(text);
+            List<JSONObject> devices = new ArrayList<>();
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject item = array.optJSONObject(i);
+                if (item != null)
+                    devices.add(item);
+            }
+            return devices;
+        }
+    }
+
+    List<Relay> fetchRelays() throws Exception {
+        Request request = new Request.Builder()
+                .url(API + "/www/relays/all")
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            String text = responseText(response);
+            if (!response.isSuccessful())
+                throw new IOException("Mullvad relay request failed: " + response.code() + " " + text);
+
+            JSONArray array = new JSONArray(text);
+            List<Relay> relays = new ArrayList<>();
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject item = array.optJSONObject(i);
+                if (item == null)
+                    continue;
+                if (!"wireguard".equals(item.optString("type")))
+                    continue;
+                if (!item.optBoolean("active", false))
+                    continue;
+
+                Relay relay = new Relay();
+                relay.hostname = item.optString("hostname");
+                relay.countryCode = item.optString("country_code");
+                relay.countryName = item.optString("country_name");
+                relay.provider = item.optString("provider");
+                relay.ipv4 = item.optString("ipv4_addr_in");
+                relay.publicKey = item.optString("pubkey");
+                relay.speed = Math.max(1, item.optInt("network_port_speed", 1));
+                relay.stboot = item.optBoolean("stboot", false);
+                if (!TextUtils.isEmpty(relay.hostname) &&
+                        !TextUtils.isEmpty(relay.ipv4) &&
+                        !TextUtils.isEmpty(relay.publicKey))
+                    relays.add(relay);
+            }
+            return relays;
+        }
+    }
+
+    private Relay chooseRelay(List<Relay> relays, String requestedCountryCode) {
+        return chooseRelay(relays, requestedCountryCode, null);
+    }
+
+    private Relay chooseRelay(List<Relay> relays, String requestedCountryCode, String excludeHostname) {
+        if (relays.isEmpty())
+            throw new IllegalStateException("No active Mullvad WireGuard relays found");
+
+        List<Relay> candidates = filterCountry(relays, normalizeCountry(requestedCountryCode));
+        if (candidates.isEmpty())
+            candidates = filterCountry(relays, defaultCountry());
+        if (candidates.isEmpty())
+            candidates = new ArrayList<>(relays);
+
+        if (!TextUtils.isEmpty(excludeHostname)) {
+            List<Relay> withoutExcluded = new ArrayList<>();
+            for (Relay relay : candidates)
+                if (!excludeHostname.equals(relay.hostname))
+                    withoutExcluded.add(relay);
+            // Only apply the exclusion if it leaves a choice — a single-relay
+            // country should still return that relay rather than throw.
+            if (!withoutExcluded.isEmpty())
+                candidates = withoutExcluded;
+        }
+
+        List<Relay> stboot = new ArrayList<>();
+        for (Relay relay : candidates)
+            if (relay.stboot)
+                stboot.add(relay);
+        if (!stboot.isEmpty())
+            candidates = stboot;
+
+        int total = 0;
+        for (Relay relay : candidates)
+            total += relay.speed;
+        int pick = random.nextInt(Math.max(1, total));
+        for (Relay relay : candidates) {
+            pick -= relay.speed;
+            if (pick < 0)
+                return relay;
+        }
+        return candidates.get(0);
+    }
+
+    private List<Relay> filterCountry(List<Relay> relays, String countryCode) {
+        List<Relay> result = new ArrayList<>();
+        if (TextUtils.isEmpty(countryCode))
+            return result;
+        for (Relay relay : relays)
+            if (countryCode.equals(relay.countryCode))
+                result.add(relay);
+        return result;
+    }
+
+    private static String addressOf(JSONObject device) {
+        String ipv4 = device.optString("ipv4_address");
+        String ipv6 = device.optString("ipv6_address");
+        return TextUtils.isEmpty(ipv4) ? ipv6 :
+                TextUtils.isEmpty(ipv6) ? ipv4 : ipv4 + ", " + ipv6;
+    }
+
+    private String buildConfig(String privateKey, JSONObject device, Relay relay) {
+        String deviceName = device.optString("name");
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("[Interface]\n");
+        if (!TextUtils.isEmpty(deviceName))
+            sb.append("# Mullvad device = ").append(deviceName).append('\n');
+        sb.append("PrivateKey = ").append(privateKey).append('\n');
+        sb.append("Address = ").append(addressOf(device)).append('\n');
+        sb.append("DNS = ").append(DEFAULT_DNS).append("\n\n");
+        sb.append("[Peer]\n");
+        sb.append("# Mullvad relay = ").append(relay.hostname).append('\n');
+        if (!TextUtils.isEmpty(relay.provider))
+            sb.append("# Mullvad provider = ").append(relay.provider).append('\n');
+        sb.append("PublicKey = ").append(relay.publicKey).append('\n');
+        sb.append("AllowedIPs = 0.0.0.0/0, ::/0\n");
+        sb.append("Endpoint = ").append(relay.ipv4).append(':').append(DEFAULT_PORT).append('\n');
+        return sb.toString();
+    }
+
+    private JSONObject postJson(String url, String token, JSONObject body) throws Exception {
+        return requestJson("POST", url, token, body);
+    }
+
+    private JSONObject requestJson(String method, String url, String token, JSONObject body) throws Exception {
+        Request.Builder builder = new Request.Builder()
+                .url(url);
+        RequestBody requestBody = RequestBody.create(body.toString(), JSON);
+        if ("PUT".equals(method))
+            builder.put(requestBody);
+        else
+            builder.post(requestBody);
+        if (!TextUtils.isEmpty(token))
+            builder.header("Authorization", "Bearer " + token);
+
+        try (Response response = client.newCall(builder.build()).execute()) {
+            String text = responseText(response);
+            if (!response.isSuccessful())
+                throw new ApiRejectedException("Mullvad request failed: " + response.code() +
+                        " " + text);
+            return new JSONObject(text);
+        }
+    }
+
+    private String responseText(Response response) throws IOException {
+        ResponseBody body = response.body();
+        return body == null ? "" : body.string();
+    }
+
+    private String defaultCountry() {
+        return normalizeCountry(Locale.getDefault().getCountry());
+    }
+
+    private static String normalizeCountry(String countryCode) {
+        if (countryCode == null)
+            return "";
+        return countryCode.trim().toLowerCase(Locale.ROOT);
+    }
+}

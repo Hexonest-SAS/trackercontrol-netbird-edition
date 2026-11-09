@@ -1,0 +1,34 @@
+[package]
+name = "wgbridge"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+
+[workspace]
+members = ["tc-dns"]
+resolver = "2"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+tc-dns = { path = "tc-dns" }
+gotatun = { version = "=0.10.2", default-features = false, features = ["ring", "device"] }
+tokio = { version = "1.43", features = ["rt-multi-thread", "net", "sync", "time", "macros"] }
+base64 = "0.23"
+hex = "0.4"
+ipnetwork = "0.21"
+getrandom = "0.4"
+libc = "0.2"
+log = "0.4"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22"
+android_logger = "0.15"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

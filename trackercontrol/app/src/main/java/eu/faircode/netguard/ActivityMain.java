@@ -1,0 +1,1682 @@
+/*
+ * This file is from NetGuard.
+ *
+ * NetGuard is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * NetGuard is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with NetGuard.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * Copyright © 2015–2020 Marcel Bokhorst (M66B)
+ * Copyright © 2019–2026 Konrad Kollnig
+ */
+
+package eu.faircode.netguard;
+
+import android.annotation.SuppressLint;
+import android.Manifest;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
+import android.database.Cursor;
+import android.net.Uri;
+import android.net.VpnService;
+import android.os.AsyncTask;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
+import android.text.TextUtils;
+import android.text.method.LinkMovementMethod;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
+import android.view.View;
+import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.activity.OnBackPressedCallback;
+import androidx.appcompat.app.AlertDialog;
+
+import com.google.android.material.appbar.AppBarLayout;
+import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.SearchView;
+import com.google.android.material.materialswitch.MaterialSwitch;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+import androidx.preference.PreferenceManager;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+
+import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.opencsv.CSVWriter;
+
+import net.kollnig.missioncontrol.ActivityOnboarding;
+import net.kollnig.missioncontrol.Common;
+import net.kollnig.missioncontrol.LocalNetworkAccess;
+import net.kollnig.missioncontrol.R;
+import net.kollnig.missioncontrol.TimelineFragment;
+import net.kollnig.missioncontrol.data.Tracker;
+import net.kollnig.missioncontrol.data.TrackerList;
+import net.kollnig.missioncontrol.vpn.VpnFragment;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+
+public class ActivityMain extends AppCompatActivity implements SharedPreferences.OnSharedPreferenceChangeListener {
+    private static final String TAG = "TrackerControl.Main";
+
+    private static int[] TITLES = new int[] {
+            R.string.app_name,
+            R.string.control_trackers,
+            R.string.forever_free,
+            R.string.your_privacy,
+    };
+
+    private boolean running = false;
+    private ImageView ivIcon;
+    private TextView tvTitle;
+    private ImageView ivQueue;
+    private MaterialSwitch swEnabled;
+    private ImageView ivMetered;
+    private SwipeRefreshLayout swipeRefresh;
+    private AdapterRule adapter = null;
+    private MenuItem menuSearch = null;
+    private BottomNavigationView bottomNav;
+    private View llAppsContent;
+    private View timelineContainer;
+    private View vpnContainer;
+    private int currentTab = R.id.nav_timeline;
+    private boolean vpnFragmentRequested = false;
+    private AlertDialog dialogVpn = null;
+    private AlertDialog dialogLegend = null;
+    private AlertDialog dialogAbout = null;
+    private final Handler searchHandler = new Handler(Looper.getMainLooper());
+    private Runnable searchRunnable;
+    private static final long SEARCH_DEBOUNCE_MS = 300;
+
+    private static final int REQUEST_VPN = 1;
+    private static final int REQUEST_INVITE = 2;
+    public static final int REQUEST_ROAMING = 3;
+    public static final int REQUEST_DETAILS_UPDATED = 4;
+
+    private static final int REQUEST_NOTIFICATIONS = 5;
+    private static final int REQUEST_LOCAL_NETWORK = 6;
+
+    private static final int REQUEST_EXPORT = 10;
+
+    private AlertDialog dialogTroubleshooting = null;
+
+    public static final String ACTION_RULES_CHANGED = "eu.faircode.netguard.ACTION_RULES_CHANGED";
+    public static final String ACTION_PRIVATE_DNS_WARNING_CHANGED =
+            "eu.faircode.netguard.ACTION_PRIVATE_DNS_WARNING_CHANGED";
+    public static final String ACTION_QUEUE_CHANGED = "eu.faircode.netguard.ACTION_QUEUE_CHANGED";
+    public static final String EXTRA_REFRESH = "Refresh";
+    public static final String EXTRA_SEARCH = "Search";
+    public static final String EXTRA_RELATED = "Related";
+    public static final String EXTRA_APPROVE = "Approve";
+    public static final String EXTRA_LOGCAT = "Logcat";
+    public static final String EXTRA_CONNECTED = "Connected";
+    public static final String EXTRA_METERED = "Metered";
+    public static final String EXTRA_SIZE = "Size";
+    public static final String EXTRA_PRIVATE_DNS_WARNING_STATE = "PrivateDnsWarningState";
+
+    private int privateDnsWarningState = ServiceSinkhole.PRIVATE_DNS_WARNING_NONE;
+    private int privateDnsWarningQueryGeneration;
+    private Boolean lastLocalNetworkGrant;
+    private boolean autofillUnavailable;
+
+    @Override
+    public Object getSystemService(String name) {
+        if (Context.AUTOFILL_SERVICE.equals(name) && autofillUnavailable)
+            return null;
+
+        try {
+            return super.getSystemService(name);
+        } catch (NullPointerException ex) {
+            StackTraceElement[] stack = ex.getStackTrace();
+            if (Context.AUTOFILL_SERVICE.equals(name)
+                    && "FileDescriptor must not be null".equals(ex.getMessage())
+                    && stack.length > 0
+                    && "android.os.ParcelFileDescriptor".equals(stack[0].getClassName())
+                    && "<init>".equals(stack[0].getMethodName())) {
+                // Android 16 can fail to construct the optional Autofill service when
+                // file-descriptor duplication fails (#931). This keeps startup alive;
+                // it does not repair the underlying descriptor failure.
+                autofillUnavailable = true;
+                Log.w(TAG, "Autofill service unavailable (#931)", ex);
+                return null;
+            }
+            throw ex;
+        }
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        Log.i(TAG, "Create version=" + Util.getSelfVersionName(this) + "/" + Util.getSelfVersionCode(this));
+        Util.logExtras(getIntent());
+
+        // Check Onboarding
+        SharedPreferences prefsOnboarding = PreferenceManager.getDefaultSharedPreferences(this);
+        if (prefsOnboarding.getInt("onboarding_version", 0) < ActivityOnboarding.ONBOARDING_VERSION) {
+            super.onCreate(savedInstanceState);
+            startActivity(new Intent(this, ActivityOnboarding.class));
+            finish();
+            return;
+        }
+
+        // Check for Xposed
+        if (Util.hasXposed(this)) {
+            Log.i(TAG, "Xposed running");
+            super.onCreate(savedInstanceState);
+            setContentView(R.layout.xposed);
+            setCopyright(findViewById(android.R.id.content));
+            return;
+        }
+
+        Util.setTheme(this);
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.main);
+
+        // Set up toolbar
+        MaterialToolbar toolbar = findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
+
+        // Apply window insets so the AppBarLayout's colored background extends
+        // behind the transparent status bar on API 35+
+        AppBarLayout appBar = findViewById(R.id.appbar);
+        final int appBarInitialTop = appBar.getPaddingTop();
+        ViewCompat.setOnApplyWindowInsetsListener(appBar, (v, insets) -> {
+            Insets sysBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(v.getPaddingLeft(), appBarInitialTop + sysBars.top,
+                    v.getPaddingRight(), v.getPaddingBottom());
+            return insets;
+        });
+
+        // Check for filtering
+        if (!Util.canFilter(this)) {
+            AlertDialog.Builder builder = new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.device_not_supported_title)
+                    .setMessage(R.string.device_not_supported_msg)
+                    .setPositiveButton(R.string.ok, (dialog, id) -> {
+                        finish();
+                    });
+
+            AlertDialog dialog = builder.create();
+            dialog.setCancelable(false); // avoid back button
+            dialog.setCanceledOnTouchOutside(false);
+            dialog.show();
+            return;
+        }
+
+        running = true;
+
+        final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        boolean enabled = prefs.getBoolean("enabled", false);
+        final boolean initialized = prefs.getBoolean("initialized", false);
+
+        // Upgrade
+        ReceiverAutostart.upgrade(initialized, this);
+
+        if (!getIntent().hasExtra(EXTRA_APPROVE)) {
+            if (enabled)
+                ServiceSinkhole.start("UI", this, true);
+            else
+                ServiceSinkhole.stop("UI", this, false);
+        }
+
+        // Action bar
+        final View actionView = getLayoutInflater().inflate(R.layout.actionmain, toolbar, false);
+        tvTitle = actionView.findViewById(R.id.tvTitle);
+        ivIcon = actionView.findViewById(R.id.ivIcon);
+        ivQueue = actionView.findViewById(R.id.ivQueue);
+        swEnabled = actionView.findViewById(R.id.swEnabled);
+        ivMetered = actionView.findViewById(R.id.ivMetered);
+        ivQueue.setContentDescription(getString(R.string.msg_queue));
+        ivMetered.setContentDescription(getString(R.string.msg_metered));
+
+        // Get daily changing title
+        if (!Util.isPlayStoreInstall())
+            tvTitle.setText(TITLES[Common.dayOfYear() % TITLES.length]);
+
+        // Icon
+        ivIcon.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View view) {
+                menu_about();
+                return true;
+            }
+        });
+
+        // Title
+        getSupportActionBar().setTitle(null);
+
+        // Netguard is busy
+        ivQueue.setOnLongClickListener(new View.OnLongClickListener() {
+            @SuppressLint("RtlHardcoded")
+            @Override
+            public boolean onLongClick(View view) {
+                int location[] = new int[2];
+                actionView.getLocationOnScreen(location);
+                Toast toast = Toast.makeText(ActivityMain.this, R.string.msg_queue, Toast.LENGTH_LONG);
+                // These are absolute screen coordinates, so gravity must stay physical-left in RTL.
+                toast.setGravity(
+                        Gravity.TOP | Gravity.LEFT,
+                        location[0] + ivQueue.getLeft(),
+                        Math.round(location[1] + ivQueue.getBottom() - toast.getView().getPaddingTop()));
+                toast.show();
+                return true;
+            }
+        });
+
+        // On/off switch
+        swEnabled.setChecked(enabled);
+        swEnabled.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                Log.i(TAG, "Switch=" + isChecked);
+                prefs.edit().putBoolean("enabled", isChecked).apply();
+
+                if (isChecked) {
+                    // Check always-on VPN settings only on Android < S (API 31)
+                    // From Android S+, these settings keys are restricted to system apps,
+                    // so lockdown cannot be detected there; coverage on S+ is limited to
+                    // the onboarding slide and the troubleshooting page (deliberate, see #743)
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S)
+                        try {
+                            String alwaysOn = Settings.Secure.getString(getContentResolver(), "always_on_vpn_app");
+                            Log.i(TAG, "Always-on=" + alwaysOn);
+                            if (!TextUtils.isEmpty(alwaysOn))
+                                if (getPackageName().equals(alwaysOn)) {
+                                    int lockdown = Settings.Secure.getInt(getContentResolver(),
+                                            "always_on_vpn_lockdown", 0);
+                                    Log.i(TAG, "Lockdown=" + lockdown);
+                                    if (lockdown != 0) {
+                                        swEnabled.setChecked(false);
+                                        Toast.makeText(ActivityMain.this, R.string.msg_always_on_lockdown,
+                                                Toast.LENGTH_LONG).show();
+                                        return;
+                                    }
+                                } else {
+                                    swEnabled.setChecked(false);
+                                    Toast.makeText(ActivityMain.this, R.string.msg_always_on, Toast.LENGTH_LONG).show();
+                                    return;
+                                }
+                        } catch (Throwable ex) { // cannot access secure property in Android S+
+                            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                        }
+
+                    try {
+                        final Intent prepare = VpnService.prepare(ActivityMain.this);
+                        if (prepare == null) {
+                            Log.i(TAG, "Prepare done");
+                            onActivityResult(REQUEST_VPN, RESULT_OK, null);
+                        } else {
+                            // Show dialog
+                            LayoutInflater inflater = LayoutInflater.from(ActivityMain.this);
+                            final View view = inflater.inflate(R.layout.vpn, null, false);
+
+                            dialogVpn = new MaterialAlertDialogBuilder(ActivityMain.this)
+                                    .setView(view)
+                                    .setCancelable(false)
+                                    .setPositiveButton(android.R.string.yes, new DialogInterface.OnClickListener() {
+                                        @Override
+                                        public void onClick(DialogInterface dialog, int which) {
+                                            if (running) {
+                                                Log.i(TAG, "Start intent=" + prepare);
+                                                try {
+                                                    // com.android.vpndialogs.ConfirmDialog required
+                                                    startActivityForResult(prepare, REQUEST_VPN);
+                                                } catch (Throwable ex) {
+                                                    Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                                                    onActivityResult(REQUEST_VPN, RESULT_CANCELED, null);
+                                                    prefs.edit().putBoolean("enabled", false).apply();
+                                                }
+                                            }
+                                        }
+                                    })
+                                    .setOnDismissListener(new DialogInterface.OnDismissListener() {
+                                        @Override
+                                        public void onDismiss(DialogInterface dialogInterface) {
+                                            dialogVpn = null;
+                                        }
+                                    })
+                                    .create();
+                            dialogVpn.show();
+                        }
+                    } catch (Throwable ex) {
+                        // Prepare failed
+                        Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                        prefs.edit().putBoolean("enabled", false).apply();
+                    }
+
+                } else
+                    ServiceSinkhole.stop("switch off", ActivityMain.this, false);
+            }
+        });
+        swEnabled.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                view.announceForAccessibility(getString(swEnabled.isChecked()
+                        ? R.string.accessibility_tracker_blocking_enabled
+                        : R.string.accessibility_tracker_blocking_disabled));
+            }
+        });
+        // Network is metered
+        ivMetered.setOnLongClickListener(new View.OnLongClickListener() {
+            @SuppressLint("RtlHardcoded")
+            @Override
+            public boolean onLongClick(View view) {
+                int location[] = new int[2];
+                actionView.getLocationOnScreen(location);
+                Toast toast = Toast.makeText(ActivityMain.this, R.string.msg_metered, Toast.LENGTH_LONG);
+                // These are absolute screen coordinates, so gravity must stay physical-left in RTL.
+                toast.setGravity(
+                        Gravity.TOP | Gravity.LEFT,
+                        location[0] + ivMetered.getLeft(),
+                        Math.round(location[1] + ivMetered.getBottom() - toast.getView().getPaddingTop()));
+                toast.show();
+                return true;
+            }
+        });
+
+        getSupportActionBar().setDisplayShowCustomEnabled(true);
+        getSupportActionBar().setCustomView(actionView);
+
+        // Bottom navigation: Timeline / Apps / VPN
+        llAppsContent = findViewById(R.id.llApps);
+        timelineContainer = findViewById(R.id.timelineContainer);
+        vpnContainer = findViewById(R.id.vpnContainer);
+        bottomNav = findViewById(R.id.bottomNav);
+
+        // Pad the bottom navigation by the system bar insets so it isn't
+        // obscured by the gesture/navigation bar on API 35+ edge-to-edge
+        final int bottomNavInitialLeft = bottomNav.getPaddingLeft();
+        final int bottomNavInitialTop = bottomNav.getPaddingTop();
+        final int bottomNavInitialRight = bottomNav.getPaddingRight();
+        final int bottomNavInitialBottom = bottomNav.getPaddingBottom();
+        ViewCompat.setOnApplyWindowInsetsListener(bottomNav, (v, insets) -> {
+            Insets sysBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(bottomNavInitialLeft + sysBars.left, bottomNavInitialTop,
+                    bottomNavInitialRight + sysBars.right, bottomNavInitialBottom + sysBars.bottom);
+            return insets;
+        });
+
+        if (savedInstanceState == null) {
+            getSupportFragmentManager()
+                    .beginTransaction()
+                    .replace(R.id.timelineContainer, new TimelineFragment())
+                    .commit();
+        }
+
+        bottomNav.setOnItemSelectedListener(item -> {
+            selectTab(item.getItemId());
+            return true;
+        });
+
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (currentTab != R.id.nav_apps && bottomNav != null) {
+                    bottomNav.setSelectedItemId(R.id.nav_apps);
+                    return;
+                }
+                setEnabled(false);
+                getOnBackPressedDispatcher().onBackPressed();
+            }
+        });
+
+        int initialTab;
+        if (savedInstanceState == null) {
+            // Land new users on Timeline; keep returning users there too — it is
+            // the "what's happening now" dashboard. Apps is one tap away.
+            initialTab = R.id.nav_timeline;
+        } else {
+            initialTab = bottomNav.getSelectedItemId();
+            if (initialTab == 0)
+                initialTab = R.id.nav_timeline;
+        }
+        bottomNav.setSelectedItemId(initialTab);
+        selectTab(initialTab);
+
+        // Disabled warning
+        TextView tvDisabled = findViewById(R.id.tvDisabled);
+        tvDisabled.setVisibility(enabled ? View.GONE : View.VISIBLE);
+
+        // Notification permissions
+        TextView tvNotifications = findViewById(R.id.tvNotifications);
+        tvNotifications.setVisibility(View.GONE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            tvNotifications.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, REQUEST_NOTIFICATIONS);
+                }
+            });
+
+        // Local network permission (Android 17+), shown when the configuration
+        // needs it: without it, a LAN DNS server or WireGuard peer is
+        // unreachable and the user is left without working name resolution.
+        TextView tvLocalNetwork = findViewById(R.id.tvLocalNetwork);
+        tvLocalNetwork.setVisibility(View.GONE);
+        tvLocalNetwork.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                requestPermissions(new String[] { LocalNetworkAccess.PERMISSION }, REQUEST_LOCAL_NETWORK);
+            }
+        });
+
+        // Private DNS pinned to a hostname while we block DoT: name resolution
+        // fails outright, so the user may never see the notification that says
+        // so — nothing they tap can load anything either.
+        TextView tvPrivateDns = findViewById(R.id.tvPrivateDns);
+        tvPrivateDns.setVisibility(View.GONE);
+        tvPrivateDns.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent settings = new Intent(Settings.ACTION_WIRELESS_SETTINGS);
+                if (settings.resolveActivity(getPackageManager()) == null)
+                    settings = new Intent(Settings.ACTION_WIFI_SETTINGS);
+                startActivity(settings);
+            }
+        });
+
+        TextView tvPrivateDnsBypass = findViewById(R.id.tvPrivateDnsBypass);
+        tvPrivateDnsBypass.setVisibility(View.GONE);
+        tvPrivateDnsBypass.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent settings;
+                if (privateDnsWarningState
+                        == ServiceSinkhole.PRIVATE_DNS_WARNING_ALLOWED_DOT)
+                    settings = new Intent(ActivityMain.this, ActivitySettings.class);
+                else {
+                    settings = new Intent(Settings.ACTION_WIRELESS_SETTINGS);
+                    if (settings.resolveActivity(getPackageManager()) == null)
+                        settings = new Intent(Settings.ACTION_WIFI_SETTINGS);
+                }
+                startActivity(settings);
+            }
+        });
+
+        // Application list
+        RecyclerView rvApplication = findViewById(R.id.rvApplication);
+        rvApplication.setHasFixedSize(false);
+        LinearLayoutManager llm = new LinearLayoutManager(this);
+        rvApplication.setLayoutManager(llm);
+        rvApplication.setItemViewCacheSize(20);
+        adapter = new AdapterRule(this, findViewById(R.id.vwPopupAnchor));
+        rvApplication.setAdapter(adapter);
+
+        // Swipe to refresh
+        swipeRefresh = findViewById(R.id.swipeRefresh);
+        swipeRefresh.setOnRefreshListener(new SwipeRefreshLayout.OnRefreshListener() {
+            @Override
+            public void onRefresh() {
+                Rule.clearCache(ActivityMain.this);
+                ServiceSinkhole.reload("pull", ActivityMain.this, false);
+                updateApplicationList(null);
+            }
+        });
+
+        showHints();
+
+        // Listen for preference changes
+        prefs.registerOnSharedPreferenceChangeListener(this);
+
+        // Listen for rule set changes
+        IntentFilter ifr = new IntentFilter(ACTION_RULES_CHANGED);
+        ifr.addAction(ACTION_PRIVATE_DNS_WARNING_CHANGED);
+        LocalBroadcastManager.getInstance(this).registerReceiver(onRulesChanged, ifr);
+
+        // Listen for queue changes
+        IntentFilter ifq = new IntentFilter(ACTION_QUEUE_CHANGED);
+        LocalBroadcastManager.getInstance(this).registerReceiver(onQueueChanged, ifq);
+
+        // Listen for added/removed applications
+        IntentFilter intentFilter = new IntentFilter();
+        intentFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
+        intentFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        intentFilter.addDataScheme("package");
+        ContextCompat.registerReceiver(this, packageChangedReceiver, intentFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
+
+        // Apps on external or adopted storage being mounted or unmounted; these
+        // broadcasts carry no data URI, so they need a filter without a scheme
+        IntentFilter ifExternal = new IntentFilter();
+        ifExternal.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_AVAILABLE);
+        ifExternal.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_UNAVAILABLE);
+        ContextCompat.registerReceiver(this, packageChangedReceiver, ifExternal, ContextCompat.RECEIVER_NOT_EXPORTED);
+
+        // Note first use
+        if (!initialized)
+            prefs.edit().putBoolean("initialized", true).apply();
+
+        // Fill application list
+        updateApplicationList(getIntent().getStringExtra(EXTRA_SEARCH));
+
+        // Handle intent
+        checkExtras(getIntent());
+
+        updateResearchModeNotice();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        Log.i(TAG, "New intent");
+        Util.logExtras(intent);
+        super.onNewIntent(intent);
+
+        if (Util.hasXposed(this))
+            return;
+
+        setIntent(intent);
+
+        if (intent.hasExtra(EXTRA_REFRESH))
+            updateApplicationList(intent.getStringExtra(EXTRA_SEARCH));
+        else
+            updateSearch(intent.getStringExtra(EXTRA_SEARCH));
+        checkExtras(intent);
+    }
+
+    @Override
+    // Resuming recomputes the complete visible rule presentation, so no exact
+    // changed range exists for this notification.
+    @SuppressLint("NotifyDataSetChanged")
+    protected void onResume() {
+        Log.i(TAG, "Resume");
+
+        if (Util.hasXposed(this)) {
+            super.onResume();
+            return;
+        }
+
+        DatabaseHelper.getInstance(this).addAccessChangedListener(accessChangedListener);
+        if (adapter != null)
+            adapter.notifyDataSetChanged();
+
+        boolean canNotify = (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                (ContextCompat.checkSelfPermission(this,
+                        android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED));
+        TextView tvNotifications = findViewById(R.id.tvNotifications);
+        if (tvNotifications != null)
+            tvNotifications.setVisibility(canNotify ? View.GONE : View.VISIBLE);
+
+        TextView tvLocalNetwork = findViewById(R.id.tvLocalNetwork);
+        if (tvLocalNetwork != null)
+            tvLocalNetwork.setVisibility(
+                    LocalNetworkAccess.isMissing(this) ? View.VISIBLE : View.GONE);
+        boolean localNetworkGranted = LocalNetworkAccess.isGranted(this);
+        if (lastLocalNetworkGrant != null && !lastLocalNetworkGrant && localNetworkGranted)
+            ServiceSinkhole.reload("permission granted", this, false);
+        lastLocalNetworkGrant = localNetworkGranted;
+        if (dialogTroubleshooting != null && dialogTroubleshooting.isShowing() &&
+                dialogTroubleshooting.getWindow() != null)
+            renderLocalNetworkAccess(dialogTroubleshooting.getWindow().getDecorView(),
+                    LocalNetworkAccess.isEnforced(), localNetworkGranted);
+
+        // Only while we are actually filtering: with the VPN off, port 853 is
+        // not blocked and a pinned resolver works fine.
+        TextView tvPrivateDns = findViewById(R.id.tvPrivateDns);
+        if (tvPrivateDns != null) {
+            boolean vpnEnabled = PreferenceManager.getDefaultSharedPreferences(this)
+                    .getBoolean("enabled", false);
+            tvPrivateDns.setVisibility(
+                    vpnEnabled && Util.isPrivateDnsBlocked(this) ? View.VISIBLE : View.GONE);
+        }
+        refreshPrivateDnsBypassBanner();
+        updateResearchModeNotice();
+
+        super.onResume();
+    }
+
+    @Override
+    protected void onPause() {
+        Log.i(TAG, "Pause");
+        super.onPause();
+
+        if (Util.hasXposed(this))
+            return;
+
+        DatabaseHelper.getInstance(this).removeAccessChangedListener(accessChangedListener);
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        Log.i(TAG, "Config");
+        super.onConfigurationChanged(newConfig);
+
+        if (Util.hasXposed(this))
+            return;
+
+        int horizontalPadding = getResources().getDimensionPixelSize(
+                R.dimen.activity_horizontal_margin);
+        updateHorizontalPadding(llAppsContent, horizontalPadding);
+        updateHorizontalPadding(findViewById(R.id.tvNotifications), horizontalPadding);
+        updateHorizontalPadding(findViewById(R.id.tvLocalNetwork), horizontalPadding);
+        updateHorizontalPadding(findViewById(R.id.tvPrivateDns), horizontalPadding);
+        updateHorizontalPadding(findViewById(R.id.tvPrivateDnsBypass), horizontalPadding);
+        updateResearchModeNotice();
+        updatePrivateDnsBypassBanner();
+    }
+
+    private void updateResearchModeNotice() {
+        TextView notice = findViewById(R.id.tvResearchMode);
+        if (notice == null)
+            return;
+        updateHorizontalPadding(notice, Math.max(
+                getResources().getDimensionPixelSize(R.dimen.activity_horizontal_margin),
+                Math.round(16 * getResources().getDisplayMetrics().density)));
+        notice.setVisibility(PreferenceManager.getDefaultSharedPreferences(this)
+                .getBoolean("log_logcat", false) ? View.VISIBLE : View.GONE);
+        notice.setOnClickListener(view -> startActivity(new Intent(this, ActivitySettings.class)));
+    }
+
+    private void updatePrivateDnsBypassBanner() {
+        TextView tvPrivateDnsBypass = findViewById(R.id.tvPrivateDnsBypass);
+        if (tvPrivateDnsBypass == null)
+            return;
+
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        boolean vpnEnabled = prefs.getBoolean("enabled", false);
+        int state = vpnEnabled ? privateDnsWarningState
+                : ServiceSinkhole.PRIVATE_DNS_WARNING_NONE;
+        if (state == ServiceSinkhole.PRIVATE_DNS_WARNING_HOSTNAME) {
+            String specifier = Util.getPrivateDnsSpecifier(this);
+            String resolver = TextUtils.isEmpty(specifier)
+                    ? getString(R.string.msg_private_dns_unknown_resolver) : specifier;
+            tvPrivateDnsBypass.setText(getString(R.string.msg_private_dns_bypass_notify, resolver));
+        } else if (state == ServiceSinkhole.PRIVATE_DNS_WARNING_ALLOWED_DOT)
+            tvPrivateDnsBypass.setText(R.string.msg_private_dns_bypass_allowed_notify);
+        tvPrivateDnsBypass.setVisibility(
+                state != ServiceSinkhole.PRIVATE_DNS_WARNING_NONE ? View.VISIBLE : View.GONE);
+    }
+
+    // The query is one-shot and its callback is gated by running/generation;
+    // migrating this legacy AsyncTask is outside this focused lint change.
+    @SuppressLint("StaticFieldLeak")
+    private void refreshPrivateDnsBypassBanner() {
+        updatePrivateDnsBypassBanner();
+        final int generation = ++privateDnsWarningQueryGeneration;
+        new AsyncTask<Void, Void, Integer>() {
+            @Override
+            protected Integer doInBackground(Void... ignored) {
+                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ActivityMain.this);
+                if (!prefs.getBoolean("enabled", false))
+                    return ServiceSinkhole.PRIVATE_DNS_WARNING_NONE;
+                return ServiceSinkhole.getPrivateDnsWarningState(ActivityMain.this);
+            }
+
+            @Override
+            protected void onPostExecute(Integer state) {
+                if (!running || generation != privateDnsWarningQueryGeneration)
+                    return;
+                privateDnsWarningState = state;
+                updatePrivateDnsBypassBanner();
+            }
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    }
+
+    private void updateHorizontalPadding(View view, int horizontalPadding) {
+        if (view != null)
+            view.setPaddingRelative(horizontalPadding, view.getPaddingTop(),
+                    horizontalPadding, view.getPaddingBottom());
+    }
+
+    @Override
+    public void onDestroy() {
+        Log.i(TAG, "Destroy");
+
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        if (Util.hasXposed(this) || !Util.canFilter(this)
+                || prefs.getInt("onboarding_version", 0) < ActivityOnboarding.ONBOARDING_VERSION) {
+            super.onDestroy();
+            return;
+        }
+
+        running = false;
+        adapter = null;
+
+        try {
+            PreferenceManager.getDefaultSharedPreferences(this).unregisterOnSharedPreferenceChangeListener(this);
+        } catch (Throwable ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+
+        try {
+            LocalBroadcastManager.getInstance(this).unregisterReceiver(onRulesChanged);
+        } catch (Throwable ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+        try {
+            LocalBroadcastManager.getInstance(this).unregisterReceiver(onQueueChanged);
+        } catch (Throwable ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+        try {
+            unregisterReceiver(packageChangedReceiver);
+        } catch (Throwable ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+
+        if (dialogVpn != null) {
+            dialogVpn.dismiss();
+            dialogVpn = null;
+        }
+        if (dialogTroubleshooting != null) {
+            dialogTroubleshooting.dismiss();
+            dialogTroubleshooting = null;
+        }
+        if (dialogLegend != null) {
+            dialogLegend.dismiss();
+            dialogLegend = null;
+        }
+        if (dialogAbout != null) {
+            dialogAbout.dismiss();
+            dialogAbout = null;
+        }
+
+        super.onDestroy();
+    }
+
+    @Override
+    // Returning from a details screen can change any rule, so the exact changed
+    // rows are not known at this point.
+    @SuppressLint("NotifyDataSetChanged")
+    protected void onActivityResult(int requestCode, int resultCode, final Intent data) {
+        Log.i(TAG, "onActivityResult request=" + requestCode + " result=" + resultCode + " ok="
+                + (resultCode == RESULT_OK));
+        Util.logExtras(data);
+
+        if (requestCode == REQUEST_VPN) {
+            // Handle VPN approval
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+            prefs.edit().putBoolean("enabled", resultCode == RESULT_OK).apply();
+            if (resultCode == RESULT_OK) {
+                // Cancel any pending pause auto-resume alarm, so a stale one
+                // does not re-fire after TC was resumed manually (#327)
+                AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+                Intent alarmIntent = new Intent(WidgetAdmin.INTENT_ON);
+                alarmIntent.setPackage(getPackageName());
+                PendingIntent pi = PendingIntentCompat.getBroadcast(this, 0, alarmIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+                am.cancel(pi);
+
+                ServiceSinkhole.start("prepared", this, true);
+            } else if (resultCode == RESULT_CANCELED)
+                Toast.makeText(this, R.string.msg_vpn_cancelled, Toast.LENGTH_LONG).show();
+
+        } else if (requestCode == REQUEST_INVITE) {
+            // Do nothing
+
+        } else if (requestCode == REQUEST_DETAILS_UPDATED) {
+            // Only rebind visible items to reflect any state changes (e.g. internet
+            // blocking, tracker protection). A full updateApplicationList reload is
+            // unnecessary since SharedPreferences listeners already handle data changes.
+            if (adapter != null)
+                adapter.notifyDataSetChanged();
+
+        } else if (requestCode == REQUEST_EXPORT) {
+            if (resultCode == RESULT_OK && data != null)
+                handleExport(data);
+
+        } else {
+            Log.w(TAG, "Unknown activity result request=" + requestCode);
+            super.onActivityResult(requestCode, resultCode, data);
+        }
+    }
+
+    // The one-shot export callback already checks running; executor migration
+    // is intentionally outside this focused lint change.
+    @SuppressLint("StaticFieldLeak")
+    private void handleExport(Intent data) {
+        new AsyncTask<Object, Object, Throwable>() {
+            @Override
+            protected Throwable doInBackground(Object... objects) {
+                Uri target = data.getData();
+                if (data.hasExtra("org.openintents.extra.DIR_PATH"))
+                    target = Uri.parse(target + "/trackercontrol_log_"
+                            + new SimpleDateFormat("yyyyMMdd", Locale.ROOT).format(new Date().getTime()) + ".csv");
+                Log.i(TAG, "Writing URI=" + target);
+
+                try (OutputStream out = getContentResolver().openOutputStream(target)) {
+                    csvExport(out);
+                    return null;
+                } catch (Throwable ex) {
+                    Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                    return ex;
+                }
+            }
+
+            @Override
+            protected void onPostExecute(Throwable ex) {
+                if (running) {
+                    if (ex == null)
+                        Toast.makeText(ActivityMain.this, R.string.exported, Toast.LENGTH_LONG).show();
+                    else
+                        Toast.makeText(ActivityMain.this, R.string.export_failed, Toast.LENGTH_LONG).show();
+                }
+            }
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    }
+
+    private void csvExport(OutputStream out) throws IOException {
+        PackageManager pm = getPackageManager();
+        try (CSVWriter csv = new CSVWriter(new OutputStreamWriter(out),
+                CSVWriter.DEFAULT_SEPARATOR,
+                CSVWriter.DEFAULT_QUOTE_CHARACTER,
+                CSVWriter.DEFAULT_ESCAPE_CHARACTER,
+                CSVWriter.RFC4180_LINE_END)) {
+
+            try (Cursor data = DatabaseHelper.getInstance(this).getHosts()) {
+                if (data == null)
+                    throw new IOException("Could not read hosts.");
+
+                List<String> columnNames = new ArrayList<>();
+                Collections.addAll(columnNames, data.getColumnNames());
+                columnNames.add("Tracker");
+                columnNames.add("Category");
+                columnNames.add("Package");
+                columnNames.add("App");
+
+                csv.writeNext(columnNames.toArray(new String[0]));
+                while (data.moveToNext()) {
+                    String[] row = new String[data.getColumnNames().length + 4];
+                    for (int i = 0; i < data.getColumnNames().length; i++) {
+                        row[i] = data.getString(i);
+                    }
+
+                    String hostname = data.getString(data.getColumnIndexOrThrow("daddr"));
+                    Tracker tracker = TrackerList.findTracker(hostname);
+                    if (tracker != null) {
+                        row[data.getColumnNames().length] = tracker.getName();
+                        row[data.getColumnNames().length + 1] = tracker.getCategory();
+                    } else {
+                        row[data.getColumnNames().length] = "";
+                        row[data.getColumnNames().length + 1] = "";
+                    }
+
+                    try {
+                        String pkg = pm.getNameForUid(data.getInt(data.getColumnIndexOrThrow("uid")));
+                        ApplicationInfo info = pm.getApplicationInfo(pkg, 0);
+                        String name = pm.getApplicationLabel(info).toString();
+
+                        row[data.getColumnNames().length + 2] = pkg;
+                        row[data.getColumnNames().length + 3] = name;
+                    } catch (PackageManager.NameNotFoundException e) {
+                        row[data.getColumnNames().length + 2] = "";
+                        row[data.getColumnNames().length + 3] = "";
+                    }
+
+                    csv.writeNext(row);
+                }
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+            @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_ROAMING) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+                ServiceSinkhole.reload("permission granted", this, false);
+        } else if (requestCode == REQUEST_NOTIFICATIONS) {
+            if (grantResults.length > 0 && grantResults[0] != PackageManager.PERMISSION_GRANTED &&
+                    !ActivityCompat.shouldShowRequestPermissionRationale(this,
+                            Manifest.permission.POST_NOTIFICATIONS))
+                try {
+                    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    Uri uri = Uri.fromParts("package", getPackageName(), null);
+                    intent.setData(uri);
+                    startActivity(intent);
+                } catch (Throwable ex) {
+                    Log.e(TAG, ex + "\n" + ex.getStackTrace());
+                }
+        } else if (requestCode == REQUEST_LOCAL_NETWORK) {
+            boolean granted = (grantResults.length > 0 &&
+                    grantResults[0] == PackageManager.PERMISSION_GRANTED);
+            lastLocalNetworkGrant = LocalNetworkAccess.isGranted(this);
+            TextView tvLocalNetwork = findViewById(R.id.tvLocalNetwork);
+            if (tvLocalNetwork != null)
+                // Derived, not inferred from the grant result: the row is about
+                // the configuration needing access, which onResume decides too.
+                tvLocalNetwork.setVisibility(
+                        LocalNetworkAccess.isMissing(this) ? View.VISIBLE : View.GONE);
+            if (dialogTroubleshooting != null && dialogTroubleshooting.isShowing() &&
+                    dialogTroubleshooting.getWindow() != null)
+                renderLocalNetworkAccess(dialogTroubleshooting.getWindow().getDecorView(),
+                        LocalNetworkAccess.isEnforced(), LocalNetworkAccess.isGranted(this));
+            if (granted)
+                // The tunnel keeps its sockets across a reload, but the native
+                // engine reopens them, so LAN destinations become reachable.
+                ServiceSinkhole.reload("permission granted", this, false);
+            else if (!ActivityCompat.shouldShowRequestPermissionRationale(this,
+                    LocalNetworkAccess.PERMISSION))
+                // Permanently denied: the prompt no longer appears, so send the
+                // user to the permission screen instead.
+                try {
+                    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    Uri uri = Uri.fromParts("package", getPackageName(), null);
+                    intent.setData(uri);
+                    startActivity(intent);
+                } catch (Throwable ex) {
+                    Log.e(TAG, ex + "\n" + ex.getStackTrace());
+                }
+        }
+    }
+
+    @Override
+    public void onSharedPreferenceChanged(SharedPreferences prefs, String name) {
+        Log.i(TAG, "Preference " + name + "=" + prefs.getAll().get(name));
+        if ("enabled".equals(name)) {
+            // Get enabled
+            boolean enabled = prefs.getBoolean(name, false);
+
+            // Display disabled warning
+            TextView tvDisabled = findViewById(R.id.tvDisabled);
+            tvDisabled.setVisibility(enabled ? View.GONE : View.VISIBLE);
+
+            // Check switch state
+            MaterialSwitch swEnabled = getSupportActionBar().getCustomView().findViewById(R.id.swEnabled);
+            if (swEnabled.isChecked() != enabled)
+                swEnabled.setChecked(enabled);
+
+            updatePrivateDnsBypassBanner();
+
+        } else if ("log_logcat".equals(name)) {
+            updateResearchModeNotice();
+
+        } else if ("block_dot".equals(name) || "log".equals(name)) {
+            refreshPrivateDnsBypassBanner();
+
+        } else if ("show_user".equals(name) ||
+                "show_system".equals(name) ||
+                "show_nointernet".equals(name) ||
+                "show_unprotected".equals(name) ||
+                "show_frozen".equals(name) ||
+                "sort".equals(name) ||
+                "imported".equals(name)) {
+            if ("sort".equals(name))
+                adapter.updateSortPreference(prefs.getString("sort", "trackers_week"));
+            updateApplicationList(null);
+
+        } else if ("manage_system".equals(name)) {
+            invalidateOptionsMenu();
+            updateApplicationList(null);
+
+            LinearLayout llSystem = findViewById(R.id.llSystem);
+            boolean system = prefs.getBoolean("manage_system", false);
+            boolean hint = prefs.getBoolean("hint_system", true);
+            llSystem.setVisibility(!system && hint ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private DatabaseHelper.AccessChangedListener accessChangedListener = new DatabaseHelper.AccessChangedListener() {
+        @Override
+        public void onChanged() {
+            runOnUiThread(new Runnable() {
+                @Override
+                // Access changes recompute all visible rows; their exact range
+                // is not available to this listener.
+                @SuppressLint("NotifyDataSetChanged")
+                public void run() {
+                    if (adapter != null && adapter.isLive())
+                        adapter.notifyDataSetChanged();
+                }
+            });
+        }
+    };
+
+    private BroadcastReceiver onRulesChanged = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Log.i(TAG, "Received " + intent);
+            Util.logExtras(intent);
+
+            if (ACTION_PRIVATE_DNS_WARNING_CHANGED.equals(intent.getAction())) {
+                privateDnsWarningQueryGeneration++;
+                privateDnsWarningState = intent.getIntExtra(EXTRA_PRIVATE_DNS_WARNING_STATE,
+                        ServiceSinkhole.PRIVATE_DNS_WARNING_NONE);
+                updatePrivateDnsBypassBanner();
+                return;
+            }
+
+            if (adapter != null)
+                if (intent.hasExtra(EXTRA_CONNECTED) && intent.hasExtra(EXTRA_METERED)) {
+                    ivIcon.setImageResource(Util.isNetworkActive(ActivityMain.this) ? R.drawable.ic_rocket_white
+                            : R.drawable.ic_rocket_white_60);
+                    if (intent.getBooleanExtra(EXTRA_CONNECTED, false)) {
+                        if (intent.getBooleanExtra(EXTRA_METERED, false))
+                            adapter.setMobileActive();
+                        else
+                            adapter.setWifiActive();
+                        ivMetered.setVisibility(
+                                Util.isMeteredNetwork(ActivityMain.this) ? View.VISIBLE : View.INVISIBLE);
+                    } else {
+                        adapter.setDisconnected();
+                        ivMetered.setVisibility(View.INVISIBLE);
+                    }
+                    if (intent.getBooleanExtra(EXTRA_REFRESH, false)) {
+                        updateApplicationList(null);
+                    }
+                } else
+                    updateApplicationList(null);
+        }
+    };
+
+    private BroadcastReceiver onQueueChanged = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Log.i(TAG, "Received " + intent);
+            Util.logExtras(intent);
+            int size = intent.getIntExtra(EXTRA_SIZE, -1);
+            ivIcon.setVisibility(size == 0 ? View.VISIBLE : View.GONE);
+            ivQueue.setVisibility(size == 0 ? View.GONE : View.VISIBLE);
+        }
+    };
+
+    private final BroadcastReceiver packageChangedReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Log.i(TAG, "Received " + intent);
+            Util.logExtras(intent);
+            updateApplicationList(null);
+        }
+    };
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        PackageManager pm = getPackageManager();
+
+        MenuInflater inflater = getMenuInflater();
+        inflater.inflate(R.menu.main, menu);
+
+        // Search
+        menuSearch = menu.findItem(R.id.menu_search);
+        menuSearch.setOnActionExpandListener(new MenuItem.OnActionExpandListener() {
+            @Override
+            public boolean onMenuItemActionExpand(MenuItem item) {
+                // Search filters the app list, so jump to the Apps tab when
+                // the user expands it from another tab. Post the switch so the
+                // SearchView finishes expanding (and grabs focus + opens
+                // the keyboard) on the current frame; otherwise the layout
+                // toggle in selectTab pre-empts focus before the IME shows.
+                if (currentTab != R.id.nav_apps && bottomNav != null) {
+                    final BottomNavigationView nav = bottomNav;
+                    nav.post(() -> nav.setSelectedItemId(R.id.nav_apps));
+                }
+                return true;
+            }
+
+            @Override
+            public boolean onMenuItemActionCollapse(MenuItem item) {
+                if (getIntent().hasExtra(EXTRA_SEARCH) && !getIntent().getBooleanExtra(EXTRA_RELATED, false))
+                    finish();
+                return true;
+            }
+        });
+
+        final SearchView searchView = (SearchView) menuSearch.getActionView();
+        searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
+            @Override
+            public boolean onQueryTextSubmit(String query) {
+                if (searchRunnable != null)
+                    searchHandler.removeCallbacks(searchRunnable);
+                if (adapter != null)
+                    adapter.getFilter().filter(query);
+                searchView.clearFocus();
+                return true;
+            }
+
+            @Override
+            public boolean onQueryTextChange(final String newText) {
+                if (searchRunnable != null)
+                    searchHandler.removeCallbacks(searchRunnable);
+                searchRunnable = new Runnable() {
+                    @Override
+                    public void run() {
+                        if (adapter != null)
+                            adapter.getFilter().filter(newText);
+                    }
+                };
+                searchHandler.postDelayed(searchRunnable, SEARCH_DEBOUNCE_MS);
+                return true;
+            }
+        });
+        searchView.setOnCloseListener(new SearchView.OnCloseListener() {
+            @Override
+            public boolean onClose() {
+                Intent intent = getIntent();
+                intent.removeExtra(EXTRA_SEARCH);
+
+                if (adapter != null)
+                    adapter.getFilter().filter(null);
+                return true;
+            }
+        });
+        String search = getIntent().getStringExtra(EXTRA_SEARCH);
+        if (search != null) {
+            menuSearch.expandActionView();
+            searchView.setQuery(search, true);
+        }
+
+        if (getIntentInvite(this).resolveActivity(pm) == null)
+            menu.removeItem(R.id.menu_invite);
+
+        if (getIntentSupport(this).resolveActivity(getPackageManager()) == null)
+            menu.removeItem(R.id.menu_support);
+
+        menu.findItem(R.id.menu_apps).setEnabled(getIntentApps(this).resolveActivity(pm) != null);
+
+        return true;
+    }
+
+    @Override
+    public boolean onPrepareOptionsMenu(Menu menu) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+
+        // Filter/sort are list-specific; hide them outside Apps. Search stays
+        // visible — clicking it on another tab jumps to Apps.
+        MenuItem filterItem = menu.findItem(R.id.menu_filter);
+        MenuItem sortItem = menu.findItem(R.id.menu_sort);
+        boolean showingApps = currentTab == R.id.nav_apps;
+        if (filterItem != null) filterItem.setVisible(showingApps);
+        if (sortItem != null) sortItem.setVisible(showingApps);
+        if (!showingApps)
+            return super.onPrepareOptionsMenu(menu);
+
+        Menu submenu = menu.findItem(R.id.menu_filter).getSubMenu();
+        if (prefs.getBoolean("manage_system", false)) {
+            menu.findItem(R.id.menu_app_user).setChecked(prefs.getBoolean("show_user", true));
+            menu.findItem(R.id.menu_app_system).setChecked(prefs.getBoolean("show_system", false));
+        } else {
+            submenu.removeItem(R.id.menu_app_user);
+            submenu.removeItem(R.id.menu_app_system);
+        }
+
+        menu.findItem(R.id.menu_app_nointernet).setChecked(prefs.getBoolean("show_nointernet", true));
+        menu.findItem(R.id.menu_app_unprotected).setChecked(prefs.getBoolean("show_unprotected", false));
+        menu.findItem(R.id.menu_app_frozen).setChecked(prefs.getBoolean("show_frozen", false));
+
+        String sort = prefs.getString("sort", "trackers_week");
+        if ("uid".equals(sort))
+            menu.findItem(R.id.menu_sort_uid).setChecked(true);
+        else if ("name".equals(sort))
+            menu.findItem(R.id.menu_sort_name).setChecked(true);
+        else if ("trackers_all".equals(sort))
+            menu.findItem(R.id.menu_sort_trackers_all).setChecked(true);
+        else if ("trackers_recent".equals(sort))
+            menu.findItem(R.id.menu_sort_by_latest_detected_tracker).setChecked(true);
+        else
+            menu.findItem(R.id.menu_sort_trackers_week).setChecked(true);
+
+        return super.onPrepareOptionsMenu(menu);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        Log.i(TAG, "Menu=" + item.getTitle());
+
+        // Handle item selection
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        int itemId = item.getItemId();
+        if (itemId == R.id.menu_app_user) {
+            item.setChecked(!item.isChecked());
+            prefs.edit().putBoolean("show_user", item.isChecked()).apply();
+            return true;
+        } else if (itemId == R.id.menu_app_system) {
+            item.setChecked(!item.isChecked());
+            prefs.edit().putBoolean("show_system", item.isChecked()).apply();
+            return true;
+        } else if (itemId == R.id.menu_app_nointernet) {
+            item.setChecked(!item.isChecked());
+            prefs.edit().putBoolean("show_nointernet", item.isChecked()).apply();
+            return true;
+        } else if (itemId == R.id.menu_app_unprotected) {
+            item.setChecked(!item.isChecked());
+            prefs.edit().putBoolean("show_unprotected", item.isChecked()).apply();
+            return true;
+        } else if (itemId == R.id.menu_app_frozen) {
+            item.setChecked(!item.isChecked());
+            prefs.edit().putBoolean("show_frozen", item.isChecked()).apply();
+            return true;
+        } else if (itemId == R.id.menu_sort_name) {
+            item.setChecked(true);
+            prefs.edit().putString("sort", "name").apply();
+            return true;
+        } else if (itemId == R.id.menu_sort_trackers_week) {
+            item.setChecked(true);
+            prefs.edit().putString("sort", "trackers_week").apply();
+            return true;
+        } else if (itemId == R.id.menu_sort_trackers_all) {
+            item.setChecked(true);
+            prefs.edit().putString("sort", "trackers_all").apply();
+            return true;
+        } else if (itemId == R.id.menu_sort_by_latest_detected_tracker) {
+            item.setChecked(true);
+            prefs.edit().putString("sort", "trackers_recent").apply();
+            return true;
+        } else if (itemId == R.id.menu_sort_uid) {
+            item.setChecked(true);
+            prefs.edit().putString("sort", "uid").apply();
+            return true;
+        } else if (itemId == R.id.menu_log) {
+            if (Util.canFilter(this))
+                startActivity(new Intent(this, ActivityLog.class));
+            else
+                Toast.makeText(this, R.string.msg_unavailable, Toast.LENGTH_SHORT).show();
+            return true;
+        } else if (itemId == R.id.menu_settings) {
+            startActivity(new Intent(this, ActivitySettings.class));
+            return true;
+        } else if (itemId == R.id.menu_invite) {
+            startActivityForResult(getIntentInvite(this), REQUEST_INVITE);
+            return true;
+        } else if (itemId == R.id.menu_legend) {
+            menu_legend();
+            return true;
+        } else if (itemId == R.id.menu_support) {
+            startActivity(getIntentSupport(this));
+            return true;
+        } else if (itemId == R.id.menu_csv) {
+            startActivityForResult(getIntentCreateExport(), REQUEST_EXPORT);
+            return true;
+        } else if (itemId == R.id.menu_troubleshooting) {
+            menu_troubleshooting();
+            return true;
+        } else if (itemId == R.id.menu_about) {
+            menu_about();
+            return true;
+        } else if (itemId == R.id.menu_apps) {
+            menu_apps();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    private Intent getIntentCreateExport() {
+        Intent intent;
+        intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_TITLE,
+                "trackercontrol_log_" + new SimpleDateFormat("yyyyMMdd", Locale.ROOT).format(new Date().getTime()) + ".csv");
+        return intent;
+    }
+
+    private void selectTab(int itemId) {
+        boolean timeline = itemId == R.id.nav_timeline;
+        boolean vpn = itemId == R.id.nav_vpn;
+        currentTab = itemId;
+        if (vpn)
+            ensureVpnFragment();
+        llAppsContent.setVisibility(!timeline && !vpn ? View.VISIBLE : View.GONE);
+        timelineContainer.setVisibility(timeline ? View.VISIBLE : View.GONE);
+        vpnContainer.setVisibility(vpn ? View.VISIBLE : View.GONE);
+
+        // Collapse SearchView only when leaving Apps. When the user opens the
+        // SearchView from another tab we switch *to* Apps; in
+        // that path we must NOT collapse, otherwise the freshly-expanded
+        // SearchView is torn down before it can take focus.
+        if ((timeline || vpn) && menuSearch != null && menuSearch.isActionViewExpanded())
+            menuSearch.collapseActionView();
+
+        // No invalidateOptionsMenu(): filter/sort live in the overflow,
+        // which calls onPrepareOptionsMenu the next time it is opened, so
+        // their visibility updates lazily — and we avoid rebuilding the
+        // SearchView mid-expand, which would also drop keyboard focus.
+    }
+
+    private void ensureVpnFragment() {
+        if (getSupportFragmentManager().findFragmentById(R.id.vpnContainer) != null)
+            return;
+        if (vpnFragmentRequested)
+            return;
+        vpnFragmentRequested = true;
+        getSupportFragmentManager()
+                .beginTransaction()
+                .replace(R.id.vpnContainer, new VpnFragment())
+                .commit();
+    }
+
+    private void showHints() {
+        final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+
+        // Hint push messages
+        final LinearLayout llPush = findViewById(R.id.llPush);
+        Button btnPush = findViewById(R.id.btnPush);
+        boolean hintPush = prefs.getBoolean("hint_push", true);
+        llPush.setVisibility(hintPush ? View.VISIBLE : View.GONE);
+        btnPush.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                prefs.edit().putBoolean("hint_push", false).apply();
+                llPush.setVisibility(View.GONE);
+            }
+        });
+
+        // Hint system applications
+        final LinearLayout llSystem = findViewById(R.id.llSystem);
+        Button btnSystem = findViewById(R.id.btnSystem);
+        boolean system = prefs.getBoolean("manage_system", false);
+        boolean hintSystem = prefs.getBoolean("hint_system", true);
+        llSystem.setVisibility(!system && hintSystem ? View.VISIBLE : View.GONE);
+        btnSystem.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                prefs.edit().putBoolean("hint_system", false).apply();
+                llSystem.setVisibility(View.GONE);
+            }
+        });
+    }
+
+    private void checkExtras(Intent intent) {
+        // Approve request
+        if (intent.hasExtra(EXTRA_APPROVE)) {
+            Log.i(TAG, "Requesting VPN approval");
+            swEnabled.toggle();
+        }
+    }
+
+    // This bounded rule query gates all UI work with running; migrating the
+    // legacy AsyncTask is deliberately outside this focused lint change.
+    @SuppressLint("StaticFieldLeak")
+    private void updateApplicationList(final String search) {
+        Log.i(TAG, "Update search=" + search);
+
+        new AsyncTask<Object, Object, List<Rule>>() {
+            private boolean refreshing = true;
+
+            @Override
+            protected void onPreExecute() {
+                swipeRefresh.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (refreshing)
+                            swipeRefresh.setRefreshing(true);
+                    }
+                });
+            }
+
+            @Override
+            protected List<Rule> doInBackground(Object... arg) {
+                return Rule.getRules(false, true, ActivityMain.this);
+            }
+
+            @Override
+            protected void onPostExecute(List<Rule> result) {
+                if (running) {
+                    if (adapter != null) {
+                        adapter.set(result);
+                        updateSearch(search);
+                    }
+
+                    if (swipeRefresh != null) {
+                        refreshing = false;
+                        swipeRefresh.setRefreshing(false);
+                    }
+                }
+            }
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    }
+
+    private void updateSearch(String search) {
+        if (menuSearch != null) {
+            SearchView searchView = (SearchView) menuSearch.getActionView();
+            if (search == null) {
+                if (menuSearch.isActionViewExpanded())
+                    adapter.getFilter().filter(searchView.getQuery().toString());
+            } else {
+                menuSearch.expandActionView();
+                searchView.setQuery(search, true);
+            }
+        }
+    }
+
+    private void menu_troubleshooting() {
+        LayoutInflater inflater = LayoutInflater.from(this);
+        View view = inflater.inflate(R.layout.troubleshooting, null, false);
+
+        // Battery optimization button
+        View btnBattery = view.findViewById(R.id.btnBattery);
+        if (Util.batteryOptimizing(this)) {
+            btnBattery.setVisibility(View.VISIBLE);
+            btnBattery.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    try {
+                        if (!Util.isPlayStoreInstall()) {
+                            // This is an explicit user recovery action for the VPN service.
+                            //noinspection BatteryLife
+                            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                    .setData(Uri.parse("package:" + getPackageName())));
+                        } else {
+                            startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                        }
+                    } catch (Throwable ex) {
+                        Log.e(TAG, ex.toString());
+                    }
+                }
+            });
+        } else {
+            btnBattery.setVisibility(View.GONE);
+            view.findViewById(R.id.tvBatteryStatus).setVisibility(View.VISIBLE);
+        }
+
+        // Data saver button
+        View btnDataSaver = view.findViewById(R.id.btnDataSaver);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && Util.dataSaving(this)) {
+            btnDataSaver.setVisibility(View.VISIBLE);
+            btnDataSaver.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    try {
+                        startActivity(new Intent(
+                                Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS,
+                                Uri.parse("package:" + getPackageName())));
+                    } catch (Throwable ex) {
+                        Log.e(TAG, ex.toString());
+                    }
+                }
+            });
+        } else {
+            btnDataSaver.setVisibility(View.GONE);
+            view.findViewById(R.id.tvDataSaverStatus).setVisibility(View.VISIBLE);
+        }
+
+        renderLocalNetworkAccess(view, LocalNetworkAccess.isEnforced(),
+                LocalNetworkAccess.isGranted(this));
+        view.findViewById(R.id.btnLocalNetworkAccess).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                requestPermissions(new String[] { LocalNetworkAccess.PERMISSION }, REQUEST_LOCAL_NETWORK);
+            }
+        });
+
+        // VPN settings button
+        view.findViewById(R.id.btnVpnSettings).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    // Android exposes this settings action from API 24; the string is
+                    // intentionally inlined for the API 23 fallback path.
+                    //noinspection InlinedApi
+                    startActivity(new Intent(Settings.ACTION_VPN_SETTINGS));
+                } catch (Throwable ex) {
+                    Log.e(TAG, ex.toString());
+                }
+            }
+        });
+
+        dialogTroubleshooting = new MaterialAlertDialogBuilder(this)
+                .setView(view)
+                .setCancelable(true)
+                .setPositiveButton(android.R.string.ok, null)
+                .setOnDismissListener(new DialogInterface.OnDismissListener() {
+                    @Override
+                    public void onDismiss(DialogInterface dialogInterface) {
+                        dialogTroubleshooting = null;
+                    }
+                })
+                .create();
+        dialogTroubleshooting.show();
+    }
+
+    static void renderLocalNetworkAccess(View popupRoot, boolean enforced, boolean granted) {
+        View section = popupRoot.findViewById(R.id.localNetworkAccessSection);
+        View action = popupRoot.findViewById(R.id.btnLocalNetworkAccess);
+        View status = popupRoot.findViewById(R.id.tvLocalNetworkAccessStatus);
+
+        boolean showSection = enforced;
+        section.setVisibility(showSection ? View.VISIBLE : View.GONE);
+        action.setVisibility(showSection && !granted ? View.VISIBLE : View.GONE);
+        status.setVisibility(showSection && granted ? View.VISIBLE : View.GONE);
+    }
+
+    private void menu_legend() {
+        // Create view
+        LayoutInflater inflater = LayoutInflater.from(this);
+        View view = inflater.inflate(R.layout.legend, null, false);
+        ImageView ivWifiOn = view.findViewById(R.id.ivWifiOn);
+        ImageView ivWifiOff = view.findViewById(R.id.ivWifiOff);
+        ImageView ivOtherOn = view.findViewById(R.id.ivOtherOn);
+        ImageView ivOtherOff = view.findViewById(R.id.ivOtherOff);
+        ImageView ivScreenOn = view.findViewById(R.id.ivScreenOn);
+        ImageView ivHostAllowed = view.findViewById(R.id.ivHostAllowed);
+        ImageView ivHostBlocked = view.findViewById(R.id.ivHostBlocked);
+        // Show dialog
+        dialogLegend = new MaterialAlertDialogBuilder(this)
+                .setView(view)
+                .setCancelable(true)
+                .setOnDismissListener(new DialogInterface.OnDismissListener() {
+                    @Override
+                    public void onDismiss(DialogInterface dialogInterface) {
+                        dialogLegend = null;
+                    }
+                })
+                .create();
+        dialogLegend.show();
+    }
+
+    private void setCopyright(View view) {
+        TextView tvCopyright = view.findViewById(R.id.tvCopyright);
+        if (tvCopyright != null)
+            tvCopyright.setText(getString(R.string.app_copyright).replaceFirst(
+                    "(?<=2019[–-])20\\d{2}",
+                    new SimpleDateFormat("yyyy", Locale.US).format(new Date())));
+    }
+
+    private void menu_about() {
+        // Create view
+        LayoutInflater inflater = LayoutInflater.from(this);
+        View view = inflater.inflate(R.layout.about, null, false);
+        setCopyright(view);
+        TextView tvVersionName = view.findViewById(R.id.tvVersionName);
+        TextView tvVersionCode = view.findViewById(R.id.tvVersionCode);
+        Button btnRate = view.findViewById(R.id.btnRate);
+        TextView tvEula = view.findViewById(R.id.tvEula);
+        TextView tvPrivacy = view.findViewById(R.id.tvPrivacy);
+        TextView tvIos = view.findViewById(R.id.tvIos);
+
+        // Show version
+        tvVersionName.setText(Util.getSelfVersionName(this));
+        tvVersionCode.setText(String.format(Locale.ROOT, "%d", Util.getSelfVersionCode(this)));
+
+        // Handle license
+        tvEula.setMovementMethod(LinkMovementMethod.getInstance());
+        tvPrivacy.setMovementMethod(LinkMovementMethod.getInstance());
+        tvIos.setMovementMethod(LinkMovementMethod.getInstance());
+
+        // Handle rate
+        btnRate.setVisibility(
+                getIntentRate(this).resolveActivity(getPackageManager()) == null ? View.GONE : View.VISIBLE);
+        btnRate.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                startActivity(getIntentRate(ActivityMain.this));
+            }
+        });
+
+        // Show dialog
+        dialogAbout = new MaterialAlertDialogBuilder(this)
+                .setView(view)
+                .setCancelable(true)
+                .setOnDismissListener(new DialogInterface.OnDismissListener() {
+                    @Override
+                    public void onDismiss(DialogInterface dialogInterface) {
+                        dialogAbout = null;
+                    }
+                })
+                .create();
+        dialogAbout.show();
+    }
+
+    private void menu_apps() {
+        startActivity(getIntentApps(this));
+    }
+
+    private static Intent getIntentInvite(Context context) {
+        Intent intent = new Intent(Intent.ACTION_SEND);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.app_name));
+        intent.putExtra(Intent.EXTRA_TEXT, context.getString(R.string.msg_try)
+                + "\n\nhttps://github.com/TrackerControl/tracker-control-android\n\n");
+        return intent;
+    }
+
+    private static Intent getIntentApps(Context context) {
+        return new Intent(Intent.ACTION_VIEW,
+                Uri.parse("https://play.google.com/store/apps/dev?id=8420080860664580239"));
+    }
+
+    private static Intent getIntentRate(Context context) {
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + context.getPackageName()));
+        if (intent.resolveActivity(context.getPackageManager()) == null)
+            intent = new Intent(Intent.ACTION_VIEW,
+                    Uri.parse("https://play.google.com/store/apps/details?id=" + context.getPackageName()));
+        return intent;
+    }
+
+    private static Intent getIntentSupport(Context context) {
+        return new Intent(Intent.ACTION_VIEW,
+                Uri.parse("https://github.com/TrackerControl/tracker-control-android#support-trackercontrol"));
+    }
+
+}

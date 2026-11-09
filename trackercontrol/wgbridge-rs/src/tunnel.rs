@@ -1,0 +1,460 @@
+//! Tunnel lifecycle: owns the tokio runtime and the gotatun Device, and
+//! exposes the blocking API surface that the JNI layer forwards to Java
+//! (start/stop/setConfig/stats/sendKeepalive/rebind/updateEndpoint).
+
+use std::io;
+use std::os::fd::{FromRawFd, OwnedFd};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use gotatun::device::Device;
+use gotatun::x25519::PublicKey;
+use tokio::runtime::Runtime;
+
+use crate::callbacks::{BridgeLogger, DnsSink, SocketProtector};
+use crate::config::{parse_uapi_config, PeerConfig};
+use crate::transport::{ProtectedUdpFactory, SocketpairRecv, Transports, TunFdSend};
+
+/// Interval the keepalive prod temporarily applies to force traffic (and, if
+/// the session expired, a fresh handshake) on a stalled tunnel.
+const PROD_KEEPALIVE_SECS: u16 = 1;
+/// How long the prod interval stays before the configured value is restored.
+const PROD_RESTORE_AFTER: Duration = Duration::from_secs(3);
+
+pub struct TunnelStats {
+    pub rx_bytes: i64,
+    pub tx_bytes: i64,
+    pub latest_handshake_millis: i64,
+    pub tun_write_failures_total: i64,
+    pub tun_write_failures_streak: i64,
+}
+
+struct Inner {
+    device: tokio::sync::Mutex<Option<Device<Transports>>>,
+    /// Peer configuration as last applied; consulted when restoring the
+    /// keepalive interval after a prod.
+    peers: std::sync::Mutex<Vec<PeerConfig>>,
+    /// Bumped on every prod. A prod's delayed restore only runs if no newer
+    /// prod has started meanwhile; the monitor prods on the same cadence as
+    /// PROD_RESTORE_AFTER, so a stale restore would otherwise revert the
+    /// prod interval before it ever emitted a keepalive.
+    prod_generation: std::sync::atomic::AtomicU64,
+    logger: Arc<dyn BridgeLogger>,
+    tun_write_failures_total: Arc<std::sync::atomic::AtomicU64>,
+    tun_write_failures_streak: Arc<std::sync::atomic::AtomicU64>,
+}
+
+pub struct Tunnel {
+    runtime: Runtime,
+    inner: Arc<Inner>,
+}
+
+fn dup_fd(fd: i32) -> io::Result<OwnedFd> {
+    // SAFETY: dup returns a fresh descriptor we exclusively own; the caller
+    // keeps ownership of the original.
+    let duped = unsafe { libc::dup(fd) };
+    if duped < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(unsafe { OwnedFd::from_raw_fd(duped) })
+}
+
+/// Boots gotatun.
+///
+/// * `uapi_config`   – UAPI text produced by WgConfig.toUapi() on the Java side.
+/// * `outbound_rx_fd`– read end of a socketpair held by C; C writes raw IP
+///   packets, gotatun reads them as its "TUN".
+/// * `tun_write_fd`  – VpnService TUN fd; decrypted inbound IP packets are
+///   written here.
+/// * `mtu`           – payload MTU (typically 1420).
+/// * `protector`     – Java callback to VpnService.protect(int).
+/// * `logger`        – Java callback for bridge log lines.
+/// * `dns`           – Java callback for passive DNS answer recording (may be None).
+///
+/// The supplied fds are duplicated; stop() closes only our duplicates.
+#[allow(clippy::too_many_arguments)] // Mirrors the fixed JNI startTunnel API.
+pub fn start_tunnel(
+    uapi_config: &str,
+    outbound_rx_fd: i32,
+    tun_write_fd: i32,
+    mtu: u16,
+    protector: Arc<dyn SocketProtector>,
+    logger: Arc<dyn BridgeLogger>,
+    dns: Option<Arc<dyn DnsSink>>,
+    // Invoked once on each tokio worker thread as it starts. The JNI layer uses
+    // this to attach the worker to the JVM, so the Java GlobalRefs held by the
+    // callbacks can be dropped on those threads without the jni crate warning
+    // "Dropping a GlobalRef in a detached thread" during teardown.
+    on_worker_start: Arc<dyn Fn() + Send + Sync>,
+) -> Result<Tunnel, String> {
+    let config = parse_uapi_config(uapi_config).map_err(|e| e.to_string())?;
+
+    let rx_fd = dup_fd(outbound_rx_fd).map_err(|e| format!("dup outbound fd: {e}"))?;
+    let tx_fd = dup_fd(tun_write_fd).map_err(|e| format!("dup tun fd: {e}"))?;
+    let tun_write_failures_total = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let tun_write_failures_streak = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let stats_total = Arc::clone(&tun_write_failures_total);
+    let stats_streak = Arc::clone(&tun_write_failures_streak);
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("wgbridge")
+        .on_thread_start(move || on_worker_start())
+        .enable_all()
+        .build()
+        .map_err(|e| format!("tokio runtime: {e}"))?;
+
+    let device = runtime
+        .block_on(async {
+            let ip_recv = SocketpairRecv::new(rx_fd, mtu)?;
+            let ip_send = TunFdSend::with_counters(
+                tx_fd,
+                dns,
+                Arc::clone(&tun_write_failures_total),
+                Arc::clone(&tun_write_failures_streak),
+            );
+            gotatun::device::build()
+                .with_udp(ProtectedUdpFactory::new(protector))
+                .with_ip_pair(ip_send, ip_recv)
+                .with_private_key(config.private_key.clone())
+                .with_peers(config.peers.iter().map(PeerConfig::to_peer))
+                .build()
+                .await
+                .map_err(|e| io::Error::other(e.to_string()))
+        })
+        .map_err(|e| format!("device up: {e}"))?;
+
+    logger.verbose(&format!(
+        "gotatun device up ({} peer(s), mtu {mtu})",
+        config.peers.len()
+    ));
+    crate::policy::set_allowed_ips(&allowed_ips(&config.peers));
+
+    Ok(Tunnel {
+        runtime,
+        inner: Arc::new(Inner {
+            device: tokio::sync::Mutex::new(Some(device)),
+            peers: std::sync::Mutex::new(config.peers),
+            prod_generation: std::sync::atomic::AtomicU64::new(0),
+            logger,
+            tun_write_failures_total: stats_total,
+            tun_write_failures_streak: stats_streak,
+        }),
+    })
+}
+
+impl Tunnel {
+    /// Reapplies UAPI configuration to the running device without restarting
+    /// it. The screen-state keepalive toggle goes through [`Tunnel::set_keepalive`]
+    /// instead, which touches one field per peer.
+    pub fn set_config(&self, uapi_config: &str) -> Result<(), String> {
+        let config = parse_uapi_config(uapi_config).map_err(|e| e.to_string())?;
+        let inner = Arc::clone(&self.inner);
+
+        self.runtime.block_on(async move {
+            let guard = inner.device.lock().await;
+            let device = guard.as_ref().ok_or("tunnel stopped")?;
+
+            let new_keys: Vec<PublicKey> = config.peers.iter().map(|p| p.public_key).collect();
+            device
+                .write(async |d| {
+                    d.set_private_key(config.private_key.clone()).await;
+                    // Drop peers absent from the new config, then upsert the rest.
+                    let existing: Vec<PublicKey> = d
+                        .peers()
+                        .await
+                        .into_iter()
+                        .map(|p| p.peer.public_key)
+                        .collect();
+                    for stale in existing.iter().filter(|k| !new_keys.contains(k)) {
+                        d.remove_peer(stale).await;
+                    }
+                    for peer in &config.peers {
+                        d.add_or_update_peer(peer.to_peer()).await;
+                    }
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+
+            crate::policy::set_allowed_ips(&allowed_ips(&config.peers));
+            *inner.peers.lock().unwrap() = config.peers;
+            Ok(())
+        })
+    }
+
+    /// Transfer counters and newest handshake, summed across all peers.
+    ///
+    /// rx_bytes is NOT payload-only: gotatun also adds received handshake
+    /// initiations and responses to it (`noise/mod.rs`), so it advances on a
+    /// path that passes handshakes while dropping transport packets. It is
+    /// therefore a weaker liveness signal than it looks — strong enough to
+    /// prove something came back from the peer, too weak to prove apps are
+    /// getting their traffic. The connectivity monitor treats a tunnel whose
+    /// rx never moves at all as dead, and leans on the TUN-write counters
+    /// below for the "handshakes fine, data lost" case.
+    pub fn stats(&self) -> Result<TunnelStats, String> {
+        let inner = Arc::clone(&self.inner);
+        self.runtime.block_on(async move {
+            let guard = inner.device.lock().await;
+            let device = guard.as_ref().ok_or("tunnel stopped")?;
+
+            let now_millis = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+
+            let mut stats = TunnelStats {
+                rx_bytes: 0,
+                tx_bytes: 0,
+                latest_handshake_millis: 0,
+                tun_write_failures_total: inner
+                    .tun_write_failures_total
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    as i64,
+                tun_write_failures_streak: inner
+                    .tun_write_failures_streak
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    as i64,
+            };
+            for peer in device.peers().await {
+                stats.rx_bytes += peer.stats.rx_bytes as i64;
+                stats.tx_bytes += peer.stats.tx_bytes as i64;
+                if let Some(elapsed) = peer.stats.last_handshake {
+                    let ts = now_millis - elapsed.as_millis() as i64;
+                    if ts > stats.latest_handshake_millis {
+                        stats.latest_handshake_millis = ts;
+                    }
+                }
+            }
+            Ok(stats)
+        })
+    }
+
+    /// Prods a stalled tunnel: temporarily lowers the persistent keepalive to
+    /// 1s so gotatun's timer loop emits traffic (and re-handshakes if the
+    /// session expired), then restores the configured interval.
+    pub fn send_keepalive(&self) {
+        let inner = Arc::clone(&self.inner);
+        self.runtime.spawn(async move {
+            use std::sync::atomic::Ordering;
+            let generation = inner.prod_generation.fetch_add(1, Ordering::SeqCst) + 1;
+            let keys: Vec<PublicKey> = {
+                let peers = inner.peers.lock().unwrap();
+                peers.iter().map(|p| p.public_key).collect()
+            };
+
+            {
+                let guard = inner.device.lock().await;
+                let Some(device) = guard.as_ref() else { return };
+                let result = device
+                    .write(async |d| {
+                        for key in &keys {
+                            d.modify_peer(key, |p| p.set_keepalive(Some(PROD_KEEPALIVE_SECS)))
+                                .await;
+                        }
+                    })
+                    .await;
+                if let Err(e) = result {
+                    inner.logger.error(&format!("keepalive prod failed: {e}"));
+                    return;
+                }
+            }
+
+            tokio::time::sleep(PROD_RESTORE_AFTER).await;
+
+            // Take the device lock before deciding anything. set_keepalive and
+            // set_config update the peer table while holding it, and a newer
+            // prod bumps the generation before taking it, so checking the
+            // generation and snapshotting the configured intervals under the
+            // lock leaves no window for a policy change to land between the
+            // snapshot and the write below and then be overwritten by it.
+            let guard = inner.device.lock().await;
+            let Some(device) = guard.as_ref() else { return };
+
+            // A newer prod owns the interval now; let its restore run instead.
+            if inner.prod_generation.load(Ordering::SeqCst) != generation {
+                return;
+            }
+
+            let configured: Vec<(PublicKey, Option<u16>)> = {
+                let peers = inner.peers.lock().unwrap();
+                peers.iter().map(|p| (p.public_key, p.keepalive)).collect()
+            };
+            let _ = device
+                .write(async |d| {
+                    for (key, keepalive) in &configured {
+                        d.modify_peer(key, |p| p.set_keepalive(*keepalive)).await;
+                    }
+                })
+                .await;
+        });
+    }
+
+    /// Newest peer handshake timestamp in epoch millis.
+    pub fn latest_handshake_millis(&self) -> Result<i64, String> {
+        Ok(self.stats()?.latest_handshake_millis)
+    }
+
+    /// Closes and re-binds the outer UDP sockets (re-protecting the new fds
+    /// via the Java callback). Call after the default network changed so the
+    /// encrypted traffic leaves via the new network instead of a dead socket.
+    pub fn rebind(&self) -> Result<(), String> {
+        let inner = Arc::clone(&self.inner);
+        self.runtime.block_on(async move {
+            let guard = inner.device.lock().await;
+            let device = guard.as_ref().ok_or("tunnel stopped")?;
+            device
+                .write(async |d| {
+                    // Changing the port marks the connection dirty so the
+                    // write commit re-runs Connection::set_up, which re-binds
+                    // through ProtectedUdpFactory. Since gotatun 0.10 the
+                    // device remembers the port it actually bound, so restoring
+                    // it would re-bind that exact port while the old socket may
+                    // still be closing (EADDRINUSE). End on 0 instead to get a
+                    // fresh ephemeral port; peers roam to it on the next packet.
+                    if d.listen_port() == 0 {
+                        d.set_listen_port(1);
+                    }
+                    d.set_listen_port(0);
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+            inner.logger.verbose("rebound WG UDP sockets");
+            Ok(())
+        })
+    }
+
+    /// Moves a peer to a new endpoint (already-resolved `ip:port` string)
+    /// without disturbing the session, e.g. after DNS re-resolution.
+    pub fn update_endpoint(&self, public_key: &PublicKey, endpoint: &str) -> Result<(), String> {
+        let addr: std::net::SocketAddr = endpoint
+            .parse()
+            .map_err(|e| format!("bad endpoint {endpoint}: {e}"))?;
+        let inner = Arc::clone(&self.inner);
+
+        self.runtime.block_on(async move {
+            let guard = inner.device.lock().await;
+            let device = guard.as_ref().ok_or("tunnel stopped")?;
+            let found = device
+                .write(async |d| {
+                    d.modify_peer(&public_key.clone(), |p| p.set_endpoint(Some(addr)))
+                        .await
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+            if !found {
+                return Err("no such peer".to_owned());
+            }
+            {
+                let mut peers = inner.peers.lock().unwrap();
+                if let Some(p) = peers.iter_mut().find(|p| p.public_key == *public_key) {
+                    p.endpoint = Some(addr);
+                }
+            }
+            inner
+                .logger
+                .verbose(&format!("peer endpoint updated to {addr}"));
+            Ok(())
+        })
+    }
+
+    /// Changes one peer's persistent keepalive interval (`None` disables it)
+    /// without disturbing its session or endpoint. This carries the
+    /// screen-state keepalive policy: reapplying the whole config for it
+    /// re-resolved every endpoint and re-serialised every peer for one field.
+    pub fn set_keepalive(
+        &self,
+        public_key: &PublicKey,
+        keepalive: Option<u16>,
+    ) -> Result<(), String> {
+        let inner = Arc::clone(&self.inner);
+        let key = public_key.clone();
+
+        self.runtime.block_on(async move {
+            let guard = inner.device.lock().await;
+            let device = guard.as_ref().ok_or("tunnel stopped")?;
+            let found = device
+                .write(async |d| d.modify_peer(&key, |p| p.set_keepalive(keepalive)).await)
+                .await
+                .map_err(|e| e.to_string())?;
+            if !found {
+                return Err("no such peer".to_owned());
+            }
+            // The prod restore reads the configured interval from here, so a
+            // prod in flight restores to the new value rather than the old one.
+            {
+                let mut peers = inner.peers.lock().unwrap();
+                if let Some(p) = peers.iter_mut().find(|p| p.public_key == key) {
+                    p.keepalive = keepalive;
+                }
+            }
+            inner.logger.verbose(&format!(
+                "peer keepalive set to {}s",
+                keepalive.unwrap_or(0)
+            ));
+            Ok(())
+        })
+    }
+
+    /// Tears down gotatun and closes the duplicated fds. Idempotent.
+    pub fn stop(&self) {
+        let inner = Arc::clone(&self.inner);
+        // Back to the fail-closed full tunnel until the next config is up.
+        // WgEgress stops the old tunnel before starting its replacement.
+        crate::policy::set_allowed_ips(&[]);
+        self.runtime.block_on(async move {
+            let device = inner.device.lock().await.take();
+            if let Some(device) = device {
+                device.stop().await;
+            }
+        });
+        self.inner.logger.verbose("gotatun device stopped");
+    }
+}
+
+impl Drop for Tunnel {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// The union of every peer's AllowedIPs.
+fn allowed_ips(peers: &[PeerConfig]) -> Vec<ipnetwork::IpNetwork> {
+    peers
+        .iter()
+        .flat_map(|p| p.allowed_ips.iter().copied())
+        .collect()
+}
+
+/// Maps the Java-side keepalive seconds (0 or negative disables) onto the
+/// interval gotatun stores, rejecting values the wire format cannot carry.
+pub fn keepalive_from_secs(secs: i32) -> Result<Option<u16>, String> {
+    if secs <= 0 {
+        return Ok(None);
+    }
+    u16::try_from(secs)
+        .map(Some)
+        .map_err(|_| format!("keepalive {secs}s exceeds 65535"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::keepalive_from_secs;
+
+    #[test]
+    fn zero_or_negative_disables_keepalive() {
+        assert_eq!(keepalive_from_secs(0), Ok(None));
+        assert_eq!(keepalive_from_secs(-5), Ok(None));
+    }
+
+    #[test]
+    fn positive_seconds_are_kept() {
+        assert_eq!(keepalive_from_secs(25), Ok(Some(25)));
+        assert_eq!(keepalive_from_secs(65535), Ok(Some(65535)));
+    }
+
+    #[test]
+    fn out_of_range_is_rejected() {
+        assert!(keepalive_from_secs(65536).is_err());
+    }
+}

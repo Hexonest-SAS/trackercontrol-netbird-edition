@@ -1,0 +1,294 @@
+/*
+ * This file is part of TrackerControl.
+ *
+ * TrackerControl is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * TrackerControl is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with TrackerControl.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * VPN routing approach informed by DuckDuckGo App Tracking Protection (Apache 2.0).
+ * See: https://github.com/duckduckgo/Android
+ */
+
+package eu.faircode.netguard;
+
+import android.util.Log;
+
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+/**
+ * IPv4 VPN routes. RFC 1918 ranges are excluded by default, but WireGuard
+ * AllowedIPs can route them through the tunnel. Reserved and carrier ranges
+ * remain excluded.
+ */
+public class VpnRoutes {
+    private static final String TAG = "TrackerControl.VpnRoutes";
+    private static volatile List<IPUtil.CIDR> cachedRoutes;
+
+    // Ranges ALWAYS excluded from VPN routing, regardless of WireGuard
+    // AllowedIPs (must not overlap each other or RFC1918_RANGES).
+    private static final String[][] ALWAYS_EXCLUDED = {
+            // Reserved ranges
+            {"0.0.0.0", "8"},       // Current network (RFC 1122)
+            {"100.64.0.0", "10"},   // CGNAT (RFC 6598)
+            {"127.0.0.0", "8"},     // Loopback (RFC 1122)
+            {"169.254.0.0", "16"},  // Link-local (RFC 3927)
+            {"224.0.0.0", "3"},     // Multicast (224/4) + reserved (240/4)
+
+            // T-Mobile Wi-Fi calling
+            {"66.94.2.0", "24"},    // 66.94.2.0   - 66.94.2.255
+            {"66.94.6.0", "23"},    // 66.94.6.0   - 66.94.7.255
+            {"66.94.8.0", "22"},    // 66.94.8.0   - 66.94.11.255
+            {"208.54.0.0", "16"},   // 208.54.0.0  - 208.54.255.255
+
+            // Verizon Wi-Fi calling
+            {"66.82.0.0", "15"},    // 66.82.0.0   - 66.83.255.255
+            {"66.174.0.0", "16"},   // 66.174.0.0  - 66.174.255.255
+            {"69.96.0.0", "13"},    // 69.96.0.0   - 69.103.255.255
+            {"70.192.0.0", "11"},   // 70.192.0.0  - 70.223.255.255
+            {"72.96.0.0", "11"},    // 72.96.0.0   - 72.127.255.255
+            {"75.192.0.0", "10"},   // 75.192.0.0  - 75.255.255.255
+            {"97.0.0.0", "10"},     // 97.0.0.0    - 97.63.255.255
+            {"97.128.0.0", "9"},    // 97.128.0.0  - 97.255.255.255
+            {"174.192.0.0", "10"},  // 174.192.0.0 - 174.255.255.255
+    };
+
+    // RFC 1918 private ranges. Excluded by default so LAN traffic bypasses the
+    // tunnel, but included (routed into the tunnel) for the portion covered by
+    // the active WireGuard profile's AllowedIPs.
+    private static final String[][] RFC1918_RANGES = {
+            {"10.0.0.0", "8"},      // Private (RFC 1918)
+            {"172.16.0.0", "12"},   // Private (RFC 1918)
+            {"192.168.0.0", "16"},  // Private (RFC 1918)
+    };
+
+    /**
+     * Returns the default route list (WireGuard remote egress off): all public
+     * IPv4 space excluding private, reserved, and carrier Wi-Fi calling ranges.
+     * Computed once and cached for all subsequent calls.
+     */
+    public static List<IPUtil.CIDR> getRoutes() {
+        if (cachedRoutes == null) {
+            synchronized (VpnRoutes.class) {
+                if (cachedRoutes == null) {
+                    cachedRoutes = computeRoutes(Collections.emptyList());
+                }
+            }
+        }
+        return cachedRoutes;
+    }
+
+    /**
+     * Returns the full-tunnel route list (a single 0.0.0.0/0 default route)
+     * used by tethering compatibility mode.
+     *
+     * <p>Some devices only forward tethered traffic into the tun while the VPN
+     * carries a real default route; with the split-tunnel route set above they
+     * fall back to the device's own tethering path, which on such devices is
+     * broken (#699). This also puts the tethering downstream subnets
+     * (192.168.42/43/44/49) and the 255.255.255.255 DHCP broadcast back inside
+     * the tunnel, matching the behaviour TrackerControl had before the static
+     * route set was introduced.
+     *
+     * <p>The cost is that LAN traffic and reserved ranges no longer bypass the
+     * tunnel, which is why this is opt-in. Carrier ePDG addresses are still
+     * excluded on Android 13+, where {@code excludeRoute()} applies on top of
+     * this route.
+     */
+    public static List<IPUtil.CIDR> getTetheringRoutes() {
+        return Collections.singletonList(new IPUtil.CIDR("0.0.0.0", 0));
+    }
+
+    /**
+     * Returns the route list for an active WireGuard remote-egress tunnel,
+     * making the profile's AllowedIPs authoritative over the RFC 1918
+     * exclusions. Any part of an RFC 1918 range covered by {@code wgAllowedIps}
+     * is routed into the tunnel; everything else behaves exactly as
+     * {@link #getRoutes()}.
+     *
+     * @param wgAllowedIps the union of every peer's {@code AllowedIPs} entries
+     *                     (CIDR strings; IPv6 entries are ignored for now).
+     */
+    public static List<IPUtil.CIDR> getRoutes(List<String> wgAllowedIps) {
+        List<IPUtil.CIDR> allowedV4 = parseV4AllowedIps(wgAllowedIps);
+        if (allowedV4.isEmpty())
+            return getRoutes(); // No IPv4 AllowedIPs — identical to WG-off default
+        return computeRoutes(allowedV4);
+    }
+
+    private static List<IPUtil.CIDR> computeRoutes(List<IPUtil.CIDR> allowedV4) {
+        // Build the excluded intervals: always-excluded ranges verbatim, plus
+        // each RFC 1918 range with any AllowedIPs-covered portion carved out.
+        List<long[]> excluded = new ArrayList<>();
+        for (String[] range : ALWAYS_EXCLUDED)
+            excluded.add(toInterval(range[0], Integer.parseInt(range[1])));
+
+        List<long[]> allowed = new ArrayList<>();
+        for (IPUtil.CIDR cidr : allowedV4)
+            allowed.add(new long[]{inetToLong(cidr.getStart()), inetToLong(cidr.getEnd())});
+
+        for (String[] range : RFC1918_RANGES) {
+            long[] interval = toInterval(range[0], Integer.parseInt(range[1]));
+            excluded.addAll(subtract(interval[0], interval[1], allowed));
+        }
+
+        excluded.sort((a, b) -> Long.compare(a[0], b[0]));
+
+        // Compute the complement: all IPv4 space NOT in the exclusion list.
+        List<IPUtil.CIDR> routes = new ArrayList<>();
+        try {
+            long startLong = 0; // 0.0.0.0
+            for (long[] exclude : excluded) {
+                if (exclude[0] > startLong)
+                    routes.addAll(IPUtil.toCIDR(longToInet(startLong), longToInet(exclude[0] - 1)));
+                if (exclude[1] >= 0xFFFFFFFFL) {
+                    startLong = 0xFFFFFFFFL + 1; // Past end of IPv4 space
+                    break;
+                }
+                if (exclude[1] + 1 > startLong)
+                    startLong = exclude[1] + 1;
+            }
+            // Any remaining space after the last exclusion.
+            if (startLong <= 0xFFFFFFFFL)
+                routes.addAll(IPUtil.toCIDR(longToInet(startLong), longToInet(0xFFFFFFFFL)));
+        } catch (UnknownHostException ex) {
+            Log.e(TAG, "Failed to compute routes: " + ex);
+        }
+
+        Log.i(TAG, "Computed " + routes.size() + " VPN routes from "
+                + excluded.size() + " exclusions (" + allowedV4.size() + " WG AllowedIPs)");
+        return Collections.unmodifiableList(routes);
+    }
+
+    /**
+     * Returns the sub-intervals of [start, end] not covered by any interval in
+     * {@code allowed}. {@code allowed} intervals may overlap and be unsorted.
+     */
+    private static List<long[]> subtract(long start, long end, List<long[]> allowed) {
+        // Clip the allowed intervals to [start, end] and sort by start.
+        List<long[]> overlaps = new ArrayList<>();
+        for (long[] a : allowed) {
+            long s = Math.max(a[0], start);
+            long e = Math.min(a[1], end);
+            if (s <= e)
+                overlaps.add(new long[]{s, e});
+        }
+        overlaps.sort((a, b) -> Long.compare(a[0], b[0]));
+
+        List<long[]> result = new ArrayList<>();
+        long cursor = start;
+        for (long[] a : overlaps) {
+            if (a[0] > cursor)
+                result.add(new long[]{cursor, a[0] - 1});
+            if (a[1] + 1 > cursor)
+                cursor = a[1] + 1;
+            if (cursor > end)
+                break;
+        }
+        if (cursor <= end)
+            result.add(new long[]{cursor, end});
+        return result;
+    }
+
+    /** Parse WireGuard AllowedIPs CIDR strings, keeping only valid IPv4 entries. */
+    private static List<IPUtil.CIDR> parseV4AllowedIps(List<String> wgAllowedIps) {
+        List<IPUtil.CIDR> allowedV4 = new ArrayList<>();
+        if (wgAllowedIps == null)
+            return allowedV4;
+        for (String raw : wgAllowedIps) {
+            if (raw == null)
+                continue;
+            String entry = raw.trim();
+            if (entry.isEmpty())
+                continue;
+            try {
+                String[] parts = entry.split("/");
+                String ip = parts[0].trim();
+                if (ip.contains(":"))
+                    continue; // IPv6 — see class docs; tracked as follow-up
+                int prefix = parts.length > 1 ? Integer.parseInt(parts[1].trim()) : 32;
+                if (prefix < 0 || prefix > 32)
+                    continue;
+                // A hostile profile can put anything in AllowedIPs, so parse
+                // this by hand rather than calling InetAddress.getByName(ip):
+                // that resolves any entry that is not itself a numeric
+                // literal, causing a DNS lookup on the VPN setup thread for
+                // e.g. "AllowedIPs = attacker.example/32".
+                byte[] address = parseIPv4Literal(ip);
+                if (address == null)
+                    continue; // not a dotted-quad literal (e.g. a hostname)
+                allowedV4.add(new IPUtil.CIDR(InetAddress.getByAddress(address), prefix));
+            } catch (Throwable ex) {
+                Log.w(TAG, "Ignoring malformed AllowedIPs entry '" + entry + "': " + ex);
+            }
+        }
+        return allowedV4;
+    }
+
+    /**
+     * Parse a dotted-quad IPv4 literal without ever resolving a hostname –
+     * unlike {@link InetAddress#getByName(String)}, which falls back to a DNS
+     * lookup for anything that is not itself a numeric address. Four decimal
+     * octets (0-255), no leading '+' or embedded whitespace; anything else,
+     * including a hostname, returns null.
+     */
+    private static byte[] parseIPv4Literal(String ip) {
+        String[] octets = ip.split("\\.", -1);
+        if (octets.length != 4)
+            return null;
+
+        byte[] address = new byte[4];
+        for (int i = 0; i < 4; i++) {
+            String octet = octets[i];
+            if (octet.isEmpty() || octet.length() > 3)
+                return null;
+            for (int j = 0; j < octet.length(); j++) {
+                char c = octet.charAt(j);
+                if (c < '0' || c > '9')
+                    return null;
+            }
+            int value = Integer.parseInt(octet);
+            if (value > 255)
+                return null;
+            address[i] = (byte) value;
+        }
+        return address;
+    }
+
+    private static long[] toInterval(String ip, int prefix) {
+        IPUtil.CIDR cidr = new IPUtil.CIDR(ip, prefix);
+        return new long[]{inetToLong(cidr.getStart()), inetToLong(cidr.getEnd())};
+    }
+
+    private static long inetToLong(InetAddress addr) {
+        long result = 0;
+        for (byte b : addr.getAddress())
+            result = result << 8 | (b & 0xFF);
+        return result;
+    }
+
+    private static InetAddress longToInet(long addr) {
+        try {
+            byte[] b = new byte[4];
+            for (int i = 3; i >= 0; i--) {
+                b[i] = (byte) (addr & 0xFF);
+                addr >>= 8;
+            }
+            return InetAddress.getByAddress(b);
+        } catch (UnknownHostException ignore) {
+            return null;
+        }
+    }
+}

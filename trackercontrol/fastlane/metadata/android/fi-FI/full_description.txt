@@ -1,0 +1,18 @@
+TrackerControlin avulla käyttäjät voivat seurata ja hallita mobiilisovellusten taustalla toimivaa jatkuvaa tiedonkeruuta käyttäjän käyttäytymisestä ('seuranta').
+
+Seurannan havaitsemiseksi TrackerControl yhdistää Firefoxin käyttämän Disconnect-estolistan tehokkuuden ja oman sisäisen estolistamme, joka on luotu analysoimalla <i>~2 000 000</i> sovellusta! Lisäksi TrackerControl tukee mukautettuja estolistoja.
+
+Tämä lähestymistapa
+
+- paljastaa jäljityksen takana olevat yritykset,
+- mahdollistaa seurannan estämisen valikoivasti, ja
+- paljastaa seurannan tarkoitukset, kuten analytiikka tai mainonta.
+
+Sovelluksen tavoitteena on myös valistaa tietosuojalainsäädännön mukaisista oikeuksistasi, kuten EU:n yleinen tietosuoja-asetus (GDPR).
+
+TrackerControl käyttää Androidin VPN-toimintoa analysoidakseen sovellusten verkkoviestintää <i>paikallisesti Android-laitteella</i>. Tämä toteutetaan paikallisen VPN-palvelimen avulla, jotta TrackerControl voi analysoida verkkoliikennettä.
+
+Root-oikeuksia ei tarvita, muita VPN-palveluita tai yksityisiä DNS-palveluita ei tueta. Ulkoista VPN-palvelinta ei käytetä, joten tietosi pysyvät turvassa! TrackerControl suojaa sinua jopa <i>DNS cloakingilta</i> (CNAME cloaking), suositulta tekniikalta seurainten piilottamiseksi verkkosivustoihin ja sovelluksiin.
+
+TrackerControl on tutkimushanke, joten se on aina ilmainen ja avoimen lähdekoodin ohjelmisto.
+

@@ -1,0 +1,12 @@
+- Blocking Modes: minimal, standard, strict
+- DuckDuckGo Tracker Radar integration
+- Improved DNS & Encrypted DNS support
+- New Insights: tracker stats on home screen
+- Multiple blocklists & auto-updates
+- Show Unprotected Apps option
+- Removed faulty IP-based blocking
+- Renamed "Monitor" to "Exclude from VPN"
+- Cleaner UI, faster scrolling & search
+- 50% smaller app, faster startup & battery
+- Faster tracker scanner
+- New translations & bug fixes

@@ -1,0 +1,371 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:installLocation="internalOnly">
+
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- http://developer.android.com/guide/topics/security/permissions.html#normal-dangerous -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!--
+        Android 17 local network protections: reaching a DNS server, Secure DNS
+        resolver or WireGuard peer on the user's own network needs this runtime
+        permission once the app targets API 37. Only requested when a setting
+        actually points TrackerControl at the local network (see
+        net.kollnig.missioncontrol.LocalNetworkAccess).
+    -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
+    <!--
+        Only used by net.kollnig.missioncontrol.ActivityScanQr to read a
+        WireGuard configuration off a QR code; nothing else opens the camera,
+        and no frame ever leaves the device.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!--
+        Declaring CAMERA makes Play infer android.hardware.camera and
+        .autofocus as required, which would hide the app from camera-less
+        devices; scanning is optional, so mark all three optional.
+    -->
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
+
+    <!-- https://developer.android.com/preview/privacy/package-visibility -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+    <!--queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries-->
+
+    <permission
+        android:name="${applicationId}.permission.ADMIN"
+        android:description="@string/app_description"
+        android:label="@string/app_name"
+        android:protectionLevel="signature" />
+
+    <uses-permission android:name="${applicationId}.permission.ADMIN" />
+
+    <uses-feature
+        android:name="android.hardware.wifi"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+    <uses-feature
+        android:name="android.software.app_widgets"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+
+    <!-- appCategory, networkSecurityConfig and resizeableActivity are intentionally retained for their API 24+/26+ behaviour. -->
+    <application
+        android:name="eu.faircode.netguard.ApplicationEx"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:appCategory="productivity"
+        android:description="@string/app_description"
+        android:icon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/AppThemeRed"
+        tools:ignore="ManifestResource,UnusedAttribute"
+        tools:replace="android:allowBackup,android:theme">
+
+        <meta-data
+            android:name="android.max_aspect"
+            android:value="2.1" />
+
+        <activity
+            android:name="net.kollnig.missioncontrol.ActivityOnboarding"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:screenOrientation="portrait"
+            tools:ignore="LockedOrientationActivity,DiscouragedApi" />
+
+        <activity
+            android:name="eu.faircode.netguard.ActivityMain"
+            android:configChanges="orientation|screenSize"
+            android:exported="true"
+            android:label="@string/app_name_short"
+            android:launchMode="singleTop"
+            android:resizeableActivity="true"
+            android:theme="@style/AppThemeRed.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MANAGE_NETWORK_USAGE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- intent-filter android:label="@string/app_name">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:host="www.netguard.me"
+                    android:pathPrefix="/"
+                    android:scheme="https" />
+            </intent-filter-->
+        </activity>
+
+        <activity
+            android:name="eu.faircode.netguard.ActivitySettings"
+            android:configChanges="orientation|screenSize"
+            android:exported="true"
+            android:label="@string/menu_settings"
+            android:theme="@style/AppThemeRed.NoActionBar"
+            android:parentActivityName="eu.faircode.netguard.ActivityMain">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="eu.faircode.netguard.ActivityMain" />
+        </activity>
+
+        <activity
+            android:name="eu.faircode.netguard.ActivityForwarding"
+            android:configChanges="orientation|screenSize"
+            android:label="@string/setting_forwarding"
+            android:parentActivityName="eu.faircode.netguard.ActivitySettings">
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="eu.faircode.netguard.ActivitySettings" />
+        </activity>
+
+        <activity
+            android:name="eu.faircode.netguard.ActivityForwardApproval"
+            android:configChanges="orientation|screenSize"
+            android:exported="true"
+            android:permission="${applicationId}.permission.ADMIN"
+            android:theme="@style/AppDialog">
+            <intent-filter>
+                <action android:name="eu.faircode.netguard.START_PORT_FORWARD" />
+                <action android:name="eu.faircode.netguard.STOP_PORT_FORWARD" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name="eu.faircode.netguard.ActivityLog"
+            android:configChanges="orientation|screenSize"
+            android:label="@string/menu_log"
+            android:parentActivityName="eu.faircode.netguard.ActivityMain"
+            android:theme="@style/AppThemeRed.NoActionBar">
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="eu.faircode.netguard.ActivityMain" />
+        </activity>
+
+        <activity
+            android:name="eu.faircode.netguard.ActivityDns"
+            android:configChanges="orientation|screenSize"
+            android:label="@string/setting_show_resolved"
+            android:parentActivityName="eu.faircode.netguard.ActivitySettings">
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="eu.faircode.netguard.ActivitySettings" />
+        </activity>
+
+        <activity
+            android:name="net.kollnig.missioncontrol.ActivityBlocklists"
+            android:configChanges="orientation|screenSize"
+            android:label="@string/title_blocklists"
+            android:parentActivityName="eu.faircode.netguard.ActivitySettings">
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="eu.faircode.netguard.ActivitySettings" />
+        </activity>
+
+        <activity
+            android:name="net.kollnig.missioncontrol.ActivityWireGuardProfiles"
+            android:configChanges="orientation|screenSize"
+            android:label="@string/setting_wg_profile_manage"
+            android:parentActivityName="eu.faircode.netguard.ActivitySettings">
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="eu.faircode.netguard.ActivitySettings" />
+        </activity>
+
+
+        <activity
+            android:name="net.kollnig.missioncontrol.ActivityScanQr"
+            android:configChanges="orientation|screenSize"
+            android:exported="false"
+            android:label="@string/setting_wg_profile_scan"
+            android:parentActivityName="net.kollnig.missioncontrol.ActivityWireGuardProfiles">
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="net.kollnig.missioncontrol.ActivityWireGuardProfiles" />
+        </activity>
+
+        <activity
+            android:name="net.kollnig.missioncontrol.DetailsActivity"
+            android:exported="true"
+            android:label="@string/title_activity_detail"
+            android:parentActivityName="eu.faircode.netguard.ActivityMain"
+            android:theme="@style/AppTheme.NoActionBar">
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="eu.faircode.netguard.ActivityMain" />
+        </activity>
+
+        <activity
+            android:name="net.kollnig.missioncontrol.InsightsActivity"
+            android:configChanges="orientation|screenSize"
+            android:label="@string/insights_title"
+            android:parentActivityName="eu.faircode.netguard.ActivityMain">
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="eu.faircode.netguard.ActivityMain" />
+        </activity>
+
+        <activity
+            android:name="net.kollnig.missioncontrol.details.ProtectionActivity"
+            android:exported="false"
+            android:label="@string/protection_title"
+            android:parentActivityName="net.kollnig.missioncontrol.DetailsActivity"
+            android:theme="@style/AppTheme.NoActionBar">
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="net.kollnig.missioncontrol.DetailsActivity" />
+        </activity>
+
+        <activity
+            android:name="net.kollnig.missioncontrol.details.LibrariesActivity"
+            android:exported="false"
+            android:label="@string/libraries_title"
+            android:parentActivityName="net.kollnig.missioncontrol.DetailsActivity"
+            android:theme="@style/AppTheme.NoActionBar">
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="net.kollnig.missioncontrol.DetailsActivity" />
+        </activity>
+
+        <service
+
+            android:name="eu.faircode.netguard.ServiceSinkhole"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="TrackerControl is a firewall app using the Android VPN service to filter traffic on the device. A foreground service is required to process internet traffic in real-time to be able to allow and block traffic as configured by the user of the app. There is no other way to do this, and other foreground service types are either too limited or not appropriate."  />
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+
+        <!-- Public command contract: external callers send DOWNLOAD_HOSTS_FILE;
+             adding the app signature permission would break those callers. -->
+        <service
+            android:name="eu.faircode.netguard.ServiceExternal"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:label="@string/app_name"
+            tools:ignore="ExportedService">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="TrackerControl is a firewall app using the Android VPN service to filter traffic on the device. A foreground service is required to process internet traffic in real-time to be able to allow and block traffic as configured by the user of the app. There is no other way to do this, and other foreground service types are either too limited or not appropriate."  />
+            <intent-filter>
+                <action android:name="net.kollnig.missioncontrol.DOWNLOAD_HOSTS_FILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name="eu.faircode.netguard.ServiceTileMain"
+            android:exported="true"
+            android:icon="@drawable/ic_rocket_white"
+            android:label="@string/app_name"
+            tools:targetApi="n"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name="eu.faircode.netguard.ReceiverAutostart"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter android:priority="999">
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="eu.faircode.netguard.ReceiverPackageRemoved"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="eu.faircode.netguard.ReceiverPauseRevert"
+            android:exported="false" />
+
+        <receiver
+            android:name="eu.faircode.netguard.WidgetMain"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widgetmain" />
+        </receiver>
+
+        <receiver
+            android:name="eu.faircode.netguard.WidgetAdmin"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="${applicationId}.permission.ADMIN">
+            <intent-filter>
+                <action android:name="net.kollnig.missioncontrol.ON" />
+                <action android:name="net.kollnig.missioncontrol.PAUSE" />
+                <action android:name="net.kollnig.missioncontrol.OFF" />
+            </intent-filter>
+        </receiver>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.provider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/provider_paths" />
+        </provider>
+    </application>
+</manifest>

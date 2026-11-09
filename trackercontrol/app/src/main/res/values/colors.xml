@@ -1,0 +1,37 @@
+<resources>
+    <color name="colorTrackerControl">#B71C1C</color>
+    <color name="black">#000000</color>
+
+    <color name="colorPrimary">#B71C1C</color>
+    <color name="colorPrimaryDark">#7f0000</color>
+    <color name="colorPrimaryLight">#FFCDD2</color>
+    <color name="colorAccent">#004D40</color>
+
+    <color name="colorRedPrimary">@color/colorPrimary</color> <!-- or: F44336 -->
+    <color name="colorRedPrimaryDark">@color/colorPrimaryDark</color> <!-- or: D32F2F -->
+    <color name="colorRedAccent">@color/colorAccent</color> <!-- or: 009688 -->
+    <color name="colorRedOn">@color/colorRedPrimary</color>
+    <color name="colorRedOff">@color/colorRedAccent</color>
+
+    <color name="switchTrackDisable">#999</color>
+
+    <!-- Link/action color for footer-style text links (e.g. "Manage WireGuard
+         profiles"). Same as colorAccent in light mode; overridden with a
+         brighter tone in values-night for contrast against a dark surface. -->
+    <color name="colorFooterLink">@color/colorAccent</color>
+
+    <color name="colorSend">#FF0000</color>
+    <color name="colorReceive">#0000FF</color>
+
+    <color name="colorGrayed">#AAAAAA</color>
+
+    <color name="timeline_blocked">#C62828</color>
+    <color name="timeline_allowed">#2E7D32</color>
+
+    <color name="bottom_nav_background">#FFFFFF</color>
+    <color name="bottom_nav_active_indicator">#FFCDD2</color>
+
+    <style name="TrackerControlBottomNavActiveIndicator" parent="Widget.Material3.BottomNavigationView.ActiveIndicator">
+        <item name="android:color">@color/bottom_nav_active_indicator</item>
+    </style>
+</resources>

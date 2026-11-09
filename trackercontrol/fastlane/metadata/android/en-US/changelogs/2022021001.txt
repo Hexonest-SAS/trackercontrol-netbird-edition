@@ -1,0 +1,13 @@
+- Battery savings: cache tracker library results
+- Show tracker count in install notifications
+- Parse SNI for better detection (Play build)
+- Basic IP-based tracker detection & blocking
+- Highlight company may be inaccurate
+- Highlight browsers not supported
+- More robust tracker blocking
+- Remove CDNs from blocklist
+- Easier to disable battery optimisations
+- Fix duplicate tracker library bug
+- Update deps, translations, blocklists
+- Improve resource handling
+- Code cleanup, better strings

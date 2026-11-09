@@ -1,0 +1,746 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="app_description">يتيح تطبيق التحكم في التتبع للمستخدمين مراقبة والتحكم في جمع البيانات الخفي والواسع النطاق والمستمر في تطبيقات الهاتف المحمول حول سلوك المستخدم (\"التتبع\").</string>
+    <string name="app_copyright">حقوق النشر \u00A9 2019–2022 Konrad Kollnig\n\nيعتمد TrackerControl على NetGuard الذي طوّره Marcel Bokhorst (M66B).</string>
+    <string name="app_android">يتطلب التحكم في التتبع نظام Android 5.1 أو إصدارًا أحدث</string>
+    <string name="app_xposed">يتسبب Xposed في الكثير من الأعطال، مما قد يؤدي إلى إزالة التحكم في التتبع من متجر Google Play، لذلك لا يتم دعم التحكم في التتبع أثناء تثبيت Xposed</string>
+    <string name="app_eula">استخدام هذا التطبيق على مسؤوليتك الخاصة. لا يمكن لأي تطبيق أن يوفر حماية بنسبة 100٪ ضد التتبع.</string>
+    <string name="app_privacy"><a href="https://github.com/TrackerControl/tracker-control-android#privacy-notice">سياسة الخصوصية</a> <a href="https://github.com/TrackerControl/tracker-control-android#cookie-policy">سياسة ملفات تعريف الارتباط</a></string>
+    <string name="app_ios"><a href="https://ios.trackercontrol.org">يتوفر TrackerControl أيضًا لنظام iOS</a></string>
+    <string name="channel_foreground">الخدمات قيد التشغيل</string>
+    <string name="channel_notify">الإشعارات العامة</string>
+    <string name="channel_access">إشعارات الوصول</string>
+    <string name="menu_search">البحث عن تطبيق</string>
+    <string name="menu_filter">تصفية التطبيقات</string>
+    <string name="menu_app_user">إظهار تطبيقات المستخدم</string>
+    <string name="menu_app_system">إظهار تطبيقات النظام</string>
+    <string name="menu_app_nointernet">إظهار التطبيقات بدون إنترنت</string>
+    <string name="menu_app_unprotected">عرض التطبيقات غير المحمية فقط</string>
+    <string name="menu_app_frozen">إظهار التطبيقات المجمّدة</string>
+    <string name="menu_sort">فرز التطبيقات</string>
+    <string name="menu_sort_name">الفرز حسب الاسم</string>
+    <string name="menu_sort_uid">الفرز حسب معرف المستخدم</string>
+    <string name="menu_sort_companies_week">الفرز حسب الشركات (الأسبوع)</string>
+    <string name="menu_sort_companies">الفرز حسب الشركات</string>
+    <string name="menu_sort_by_latest_detected_tracker">فرز حسب أحدث متتبع تم اكتشافه</string>
+    <string name="menu_log">سجل المرور</string>
+    <string name="menu_settings">الإعدادات</string>
+    <string name="menu_invite">دعوة</string>
+    <string name="menu_legend">مفتاح الرموز</string>
+    <string name="menu_support">دعم هذا التطبيق</string>
+    <string name="menu_log_support">توضيح</string>
+    <string name="menu_troubleshooting">استكشاف الأعطال</string>
+    <string name="menu_about">حول</string>
+    <string name="timeline_empty_disabled_title">TrackerControl متوقف</string>
+    <string name="timeline_empty_disabled_subtitle">فعّل TrackerControl باستخدام المفتاح في أعلى اليمين. سيظهر هنا نشاط أدوات التتبع في تطبيقاتك.</string>
+    <string name="timeline_empty_enabled_title">مراقبة أدوات التتبع…</string>
+    <string name="timeline_empty_enabled_subtitle">تتصل معظم التطبيقات بأدوات التتبع أثناء استخدامك لها فقط. افتح تطبيقًا ثم عد إلى هنا — سيظهر نشاط أدوات التتبع الخاص به هنا.</string>
+    <string name="timeline_empty_recording_off_title">تسجيل أدوات التتبع متوقف</string>
+    <string name="timeline_empty_recording_off_subtitle">تم إيقاف “البحث عن أدوات التتبع الجديدة” في الإعدادات المتقدمة. لا تزال أدوات التتبع محظورة، لكنها لم تعد تُسجَّل، لذا يبقى هذا الخط الزمني فارغًا. أعد تشغيله لرؤية نشاط أدوات التتبع مجددًا.</string>
+    <string name="timeline_empty_recording_unavailable_title">متتبع تسجيل غير متاح</string>
+    <string name="timeline_empty_recording_unavailable_subtitle">لا يتيح هذا الإصدار من TrackerControl تسجيل نشاط أدوات التتبع. لا يزال الحظر يعمل، لكن هذا الخط الزمني سيبقى فارغًا.</string>
+    <string name="timeline_open_app">فتح تطبيق</string>
+    <string name="timeline_open_settings">فتح إعدادات</string>
+    <string name="timeline_hint_tap_entry">هل هناك تطبيق لا يعمل؟ اضغط على بنده لتعديل حمايته.</string>
+    <string name="timeline_hint_dismiss">حسنًا</string>
+    <string name="unidentified_app_uid">تطبيق غير معروف (UID %1$d)</string>
+    <string name="tab_timeline">الخط الزمني</string>
+    <string name="tab_apps">التطبيقات</string>
+    <string name="timeline_section_last_hour">الساعة الأخيرة</string>
+    <string name="timeline_section_today">اليوم</string>
+    <string name="timeline_section_yesterday">أمس</string>
+    <string name="timeline_section_this_week">هذا الأسبوع</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="timeline_more_trackers" tools:ignore="PluralsCandidate">+%d المزيد</string>
+    <string name="timeline_tracker_blocked">المحظورات</string>
+    <string name="timeline_tracker_allowed">مسموح</string>
+    <!-- A blocked/allowed label followed by its share of all tracking attempts. -->
+    <string name="feed_section_last_contact">آخر اتصال %s</string>
+    <plurals name="feed_show_more_companies">
+        <item quantity="zero">إظهار %d شركة إضافية</item>
+        <item quantity="one">إظهار شركة إضافية واحدة (%d)</item>
+        <item quantity="two">إظهار شركتين إضافيتين (%d)</item>
+        <item quantity="few">إظهار %d شركات إضافية</item>
+        <item quantity="many">إظهار %d شركة إضافية</item>
+        <item quantity="other">إظهار %d شركة إضافية</item>
+    </plurals>
+    <string name="feed_allow_company_in_app">السماح بـ %1$s في %2$s</string>
+    <string name="feed_block_company_in_app">حظر %1$s في %2$s</string>
+    <string name="feed_allowed_by_you">مسموح به من قِبلك</string>
+    <string name="feed_allowed_shared_ip">مسموح · عنوان IP مشترك</string>
+    <string name="feed_monitored">قيد المراقبة</string>
+    <string name="feed_company_expanded">موسّع</string>
+    <string name="feed_company_collapsed">مطوي</string>
+    <string name="feed_essential_explainer">تحتاجه التطبيقات — مسموح به حتى يستمر %s في العمل</string>
+    <string name="feed_essential_explainer_blocked">تحتاجه التطبيقات — قد يؤدي حظره إلى تعطيل %s</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="timeline_summary_mixed" tools:ignore="PluralsCandidate">%1$d محظور · %2$d مسموح</string>
+    <plurals name="timeline_trackers_blocked">
+        <item quantity="zero">لا أدوات تتبع محظورة (%d)</item>
+        <item quantity="one">حُظرت أداة تتبع واحدة (%d)</item>
+        <item quantity="two">حُظرت أداتا تتبع (%d)</item>
+        <item quantity="few">حُظرت %d أدوات تتبع</item>
+        <item quantity="many">حُظرت %d أداة تتبع</item>
+        <item quantity="other">حُظرت %d أداة تتبع</item>
+    </plurals>
+    <plurals name="timeline_trackers_allowed">
+        <item quantity="zero">لا أدوات تتبع مسموحة (%d)</item>
+        <item quantity="one">سُمح بأداة تتبع واحدة (%d)</item>
+        <item quantity="two">سُمح بأداتي تتبع (%d)</item>
+        <item quantity="few">سُمح بـ %d أدوات تتبع</item>
+        <item quantity="many">سُمح بـ %d أداة تتبع</item>
+        <item quantity="other">سُمح بـ %d أداة تتبع</item>
+    </plurals>
+    <string name="troubleshooting_title">استكشاف الأعطال</string>
+    <string name="troubleshooting_battery_title">تحسين البطارية</string>
+    <string name="troubleshooting_battery_desc">إذا توقف TrackerControl عن العمل في الخلفية، فعطّل تحسين البطارية في Android لـ TrackerControl. اختر \"جميع التطبيقات\"، ثم اضغط على TrackerControl، واختر \"عدم التحسين\".</string>
+    <string name="troubleshooting_battery_action">تعطيل تحسين البطارية</string>
+    <string name="troubleshooting_battery_ok">تحسين البطارية معطّل بالفعل.</string>
+    <string name="troubleshooting_datasaver_title">موفّر البيانات</string>
+    <string name="troubleshooting_datasaver_desc">إذا تعذّر اتصال TrackerControl عند تفعيل موفّر البيانات، فاسمح لـ TrackerControl باستخدام البيانات دون قيود. فعّل \"بيانات الخلفية\" و\"استخدام البيانات دون قيود\".</string>
+    <string name="troubleshooting_datasaver_action">السماح باستخدام البيانات دون قيود</string>
+    <string name="troubleshooting_datasaver_ok">موفّر البيانات لا يقيّد TrackerControl.</string>
+    <string name="troubleshooting_local_network_title">الوصول إلى الشبكة المحلية</string>
+    <string name="troubleshooting_local_network_desc">الإذن مطلوب لخوادم DNS المحلية ونظراء WireGuard والوكلاء.</string>
+    <string name="troubleshooting_local_network_action">السماح بالوصول إلى الشبكة المحلية</string>
+    <string name="troubleshooting_local_network_ok">الوصول إلى الشبكة المحلية مسموح به.</string>
+    <string name="troubleshooting_app_breakage_title">توقف تطبيق عن العمل</string>
+    <string name="troubleshooting_app_breakage_desc">اضغط على التطبيق في القائمة الرئيسية، ثم اضغط على الحماية. جرّب \"الحظر الأدنى فقط\" أولًا. إذا استمرت المشكلة في التطبيق، فاختر \"السماح بأدوات التتبع\". استخدم \"تجاوز TrackerControl\" كملاذ أخير فقط.</string>
+    <string name="troubleshooting_categories_title">حظر فئات محددة من أدوات التتبع</string>
+    <string name="troubleshooting_categories_desc">يمكنك ضبط الحظر لكل تطبيق بالضغط عليه وتشغيل فئات أدوات التتبع (مثل التحليلات والإعلانات) أو إيقافها في تبويب أدوات التتبع.</string>
+    <string name="troubleshooting_alwayson_title">VPN قيد التشغيل دائمًا</string>
+    <string name="troubleshooting_alwayson_desc">إذا كان خيار \"حظر الاتصالات بدون VPN\" (الإغلاق) مفعّلًا في إعدادات VPN في Android، فلن يعمل TrackerControl بشكل صحيح. عطّل هذا الخيار.</string>
+    <string name="troubleshooting_alwayson_action">فتح VPN إعدادات</string>
+    <string name="menu_apps">تطبيقات أخرى</string>
+    <string name="menu_protocol_other">أخرى</string>
+    <string name="menu_traffic_allowed">مسموح</string>
+    <string name="menu_traffic_blocked">محظور</string>
+    <string name="menu_live">تحديثات مباشرة</string>
+    <string name="menu_refresh">تحديث</string>
+    <string name="menu_resolve">إظهار الأسماء</string>
+    <string name="menu_organization">إظهار المؤسسة</string>
+    <string name="menu_pcap_enabled">تم تمكين PCAP</string>
+    <string name="menu_pcap_export">تصدير PCAP</string>
+    <string name="menu_clear">مسح</string>
+    <string name="menu_clear_activity">مسح النشاط المسجَّل</string>
+    <string name="menu_export">تصدير</string>
+    <string name="menu_reset">إعادة تعيين</string>
+    <string name="menu_cleanup">تنظيف</string>
+    <string name="setting_options">عام</string>
+    <string name="setting_further_options">خيارات إضافية</string>
+    <string name="setting_pause">تمكين تلقائيًا بعد %1$s دقيقة</string>
+    <string name="setting_update">التحقق من وجود تحديثات</string>
+    <plurals name="pause">
+        <item quantity="zero">إيقاف مؤقت لمدة %d دقيقة</item>
+        <item quantity="one">إيقاف مؤقت لمدة %d دقيقة</item>
+        <item quantity="two">إيقاف مؤقت لمدة %d دقيقتين</item>
+        <item quantity="few">إيقاف مؤقت لمدة %d دقائق</item>
+        <item quantity="many">إيقاف مؤقت لمدة %d دقيقة</item>
+        <item quantity="other">إيقاف مؤقت لمدة %d دقيقة</item>
+    </plurals>
+    <string name="setting_ip6">تمكين حركة مرور IPv6</string>
+    <string name="setting_call">تعطيل أثناء المكالمة</string>
+    <string name="setting_reload_onconnectivity">إعادة التحميل عند كل تغيير في الاتصال</string>
+    <string name="setting_tcp_mss_clamp">وضع توافق المشاركة بالاتصال (Tethering)</string>
+    <string name="summary_tcp_mss_clamp">توجيه كل حركة المرور عبر TrackerControl وتحديد حجم مقطع TCP، لإصلاح اتصالات المشاركة التي تتوقف أو لا تحصل على إنترنت. لم يعد الوصول إلى الشبكة المحلية يتجاوز TrackerControl، وقد ينخفض الأداء.</string>
+    <string name="setting_advanced_options">خيارات متقدمة (للخبراء)</string>
+    <string name="setting_log_app">البحث عن أدوات التتبع الجديدة</string>
+    <string name="setting_log_logcat">بحث</string>
+    <string name="setting_handover">تسليم VPN سلس عند إعادة التحميل</string>
+    <string name="setting_reset_usage">إعادة تعيين استخدام الشبكة</string>
+    <string name="setting_show_resolved">إظهار أسماء المجالات التي تم حلها</string>
+    <string name="setting_exclude_all_tracking">استثناء كل التطبيقات من التتبع</string>
+    <string name="summary_exclude_all_tracking">تعطيل مراقبة أدوات التتبع لكل التطبيقات. يمكنك بعد ذلك إعادة تفعيلها لتطبيقات محددة.</string>
+    <string name="setting_include_all_tracking">تضمين كل التطبيقات في التتبع</string>
+    <string name="summary_include_all_tracking">إعادة تفعيل مراقبة أدوات التتبع لكل التطبيقات.</string>
+    <string name="setting_block_domains">تمكين ملف المضيفين</string>
+    <string name="setting_rcode">استجابة حظر المضيفين: %s</string>
+    <string name="setting_vpn4">VPN IPv4: %s</string>
+    <string name="setting_vpn6">VPN IPv6: %s</string>
+    <string name="setting_dns">VPN DNS: %s</string>
+    <string name="setting_validate">التحقق في: %s</string>
+    <string name="setting_ttl">الحد الأدنى لـ DNS TTL: %s ثانية</string>
+    <string name="setting_socks5_enabled">استخدام وكيل SOCKS5</string>
+    <string name="setting_socks5_addr">عنوان SOCKS5: %s</string>
+    <string name="setting_socks5_port">منفذ SOCKS5: %s</string>
+    <string name="setting_socks5_username">اسم مستخدم SOCKS5: %s</string>
+    <string name="setting_socks5_password">كلمة مرور SOCKS5: %s</string>
+    <string name="setting_wg_enabled">تمرير الحركة عبر نفق WireGuard</string>
+    <string name="setting_wg_profile">ملف تعريف WireGuard</string>
+    <string name="setting_wg_profile_manage">ملفات تعريف WireGuard المخصصة</string>
+    <string name="setting_wg_profile_import">استيراد إعدادات WireGuard</string>
+    <string name="setting_wg_profile_scan">مسح رمز QR</string>
+    <string name="setting_wg_profile_import_file">استيراد من ملف أو أرشيف</string>
+    <string name="setting_wg_mullvad_setup">إعداد Mullvad</string>
+    <string name="setting_wg_proton_setup">استخدام إعدادات Proton VPN</string>
+    <string name="setting_wg_keepalive_when_screen_off">إبقاء WireGuard نشطًا عند إطفاء الشاشة</string>
+    <string name="setting_wg_profile_save">حفظ ملف التعريف</string>
+    <string name="setting_wg_profile_delete">حذف ملف التعريف</string>
+    <string name="accessibility_wg_profile_edit">تحرير ملف تعريف WireGuard ‏%1$s</string>
+    <string name="accessibility_wg_profile_delete">حذف ملف تعريف WireGuard ‏%1$s</string>
+    <string name="setting_wireguard">WireGuard (معاينة)</string>
+    <string name="setting_wg_status">حالة</string>
+    <string name="setting_vpn_key_rotate_now">تدوير مفاتيح مزوّد VPN الآن</string>
+    <string name="setting_pcap_record_size">حجم سجل PCAP: %s بايت</string>
+    <string name="setting_pcap_file_size">الحد الأقصى لحجم ملف PCAP: %s ميجابايت</string>
+    <!-- Secure DNS (DoH) -->
+    <string name="setting_doh_enabled">DNS الآمن (DoH)</string>
+    <string name="summary_doh_enabled">تشفير استعلامات DNS باستخدام DNS عبر HTTPS. يتوقف تلقائيًا مؤقتًا عند تفعيل WireGuard، لأن تلك الاستعلامات تستخدم نفق WireGuard بدلًا من ذلك.</string>
+    <string name="warning_beta">ميزة تجريبية. قد لا تعمل كما هو متوقع.</string>
+    <string name="setting_doh_endpoint">عنوان URL لنقطة نهاية DoH</string>
+    <string name="summary_doh_endpoint">عنوان HTTPS URL لاستعلامات DNS عبر HTTPS</string>
+    <string name="dialog_doh_endpoint">أدخل عنوان HTTPS URL الكامل الذي يوفره مزوّد DNS لديك، بما في ذلك المسار الخاص بالمزوّد (مثل https://dns.quad9.net/dns-query). التطبيقات المستثناة من TrackerControl أو التي تستخدم DNS مشفّرًا خاصًا بها تتجاوز هذا الإعداد.</string>
+    <string name="setting_doh_dns_fallback">DNS احتياطي</string>
+    <string name="summary_doh_dns_fallback">استخدام DNS القياسي (غير المشفّر) عند فشل DoH. قد يستخدم الخيار الاحتياطي مزوّد DNS مختلفًا. قد يؤدي التعطيل إلى تعطل التطبيقات إذا كان خادم DoH متوقفًا.</string>
+    <string name="msg_invalid_doh_endpoint">أدخل عنوان HTTPS URL كاملًا لـ DNS-over-HTTPS، بما في ذلك مسار المزوّد (مثل https://dns.quad9.net/dns-query).</string>
+    <!-- Block DNS-over-TLS (DoT) -->
+    <string name="setting_block_dot">حظر DNS الخاص في Android</string>
+    <string name="summary_block_dot">عند تفعيل DNS الخاص في Android، لا يستطيع TC اكتشاف أي تتبع ولا يعمل بشكل صحيح.</string>
+    <string name="setting_stats_frequency">فاصل العينة: %s مللي ثانية</string>
+    <string name="setting_stats_samples">عدد العينات: %s ثانية</string>
+    <string name="setting_backup">نسخ احتياطي</string>
+    <string name="setting_export">تصدير إعدادات</string>
+    <string name="setting_import">استيراد الإعدادات</string>
+    <string name="setting_hosts_update">تحديث ملف المضيفين</string>
+    <string name="setting_hosts_auto_update">تحديث المضيفين تلقائيًا</string>
+    <string name="summary_hosts_auto_update">تحديث ملف المضيفين تلقائيًا في الخلفية</string>
+    <string name="summary_pause">بعد الإيقاف المؤقت من الإشعار، قم بتمكين التحكم في التتبع تلقائيًا مرة أخرى بعد العدد المحدد من الدقائق (أدخل 0 لتعطيل هذا الخيار).</string>
+    <string name="summary_update">التحقق من وجود إصدارات جديدة على GitHub مرتين يوميًا</string>
+    <string name="summary_ip6">توجيه حركة مرور IP الإصدار 6 إلى التحكم في التتبع بحيث يمكن السماح بها أو حظرها بشكل انتقائي</string>
+    <string name="summary_call">تعطيل التحكم في التتبع عند المكالمات الهاتفية الواردة أو الصادرة. يمكن استخدام هذا للتحايل على مشاكل مكالمات IP/Wi-Fi.</string>
+    <string name="summary_log_app">تعطيل لتقليل استهلاك البطارية. سيستمر حظر أدوات التتبع الجديدة، ولكن لن يتم عرضها.</string>
+    <string name="summary_block_domains">تحذير: المضيفون المحظورون غير معروضين في واجهة المستخدم.</string>
+    <string name="summary_rcode">القيمة الافتراضية هي 3 (NXDOMAIN)، والتي تعني \"مجال غير موجود\".</string>
+    <string name="summary_validate">اسم المجال المستخدم للتحقق من صحة الاتصال بالإنترنت على المنفذ 443 (https).</string>
+    <string name="summary_socks5_enabled">سيتم إرسال حركة مرور TCP فقط إلى خادم الوكيل</string>
+    <string name="summary_wg_enabled">يخفي عنوان IP للجهاز. ينقل خروج TCP وUDP عبر النفق. سترى التطبيقات أخطاء شبكة أثناء الانقطاعات — إغلاق عند الفشل دون الرجوع إلى الاتصال المباشر. قد لا تعمل الاتصالات التي يبدؤها الخادم نحو الهاتف أثناء خمول النفق (تم تعطيل keepalive لتوفير البطارية).</string>
+    <string name="summary_wg_config">الصق إعدادات [Interface] / [Peer] من مزوّدك</string>
+    <string name="summary_wg_profile">اختيار إعدادات WireGuard محفوظة</string>
+    <string name="summary_wg_profile_none">لا توجد ملفات تعريف محفوظة</string>
+    <string name="summary_wg_profile_manage">إضافة إعدادات WireGuard المخصصة أو تحريرها أو حذفها</string>
+    <string name="summary_wg_keepalive_when_screen_off">يرسل حزم keepalive بالفاصل المحدد في إعدادات WireGuard حتى عند إطفاء الشاشة. يحسّن الموثوقية في الشبكات التي تُقطع فيها الاتصالات الخاملة، لكنه يزيد استهلاك البطارية.</string>
+    <string name="summary_wg_status_off">متوقف</string>
+    <string name="summary_wg_status_missing_config">متوقف — لم تُحدَّد إعدادات</string>
+    <string name="summary_wg_status_connected">متصل</string>
+    <string name="summary_wg_status_handshaking">جارٍ المصافحة…</string>
+    <string name="summary_wg_status_blocked">محظور — %s</string>
+    <string name="summary_wg_status_starting">بدء</string>
+    <string name="summary_vpn_key_rotate_now">فرض تدوير مفاتيح WireGuard لـ Mullvad وIVPN لأغراض تصحيح الأخطاء</string>
+    <string name="msg_vpn_key_rotation_started">بدأ تدوير مفاتيح VPN</string>
+    <string name="msg_wg_config_invalid">غير صالح WireGuard إعداد: %s</string>
+    <string name="msg_wg_profile_name">اسم ملف التعريف</string>
+    <string name="msg_wg_profile_default_name">افتراضي</string>
+    <string name="msg_wg_profile_saved">تم حفظ ملف تعريف WireGuard</string>
+    <string name="msg_wg_profile_deleted">تم حذف ملف تعريف WireGuard</string>
+    <string name="msg_wg_profile_empty">لا توجد ملفات تعريف بعد</string>
+    <string name="msg_wg_profile_active">نشط</string>
+    <string name="msg_wg_profile_set_active">تعيين كنشط</string>
+    <string name="msg_wg_profile_config_hint" tools:ignore="TypographyEllipsis">[Interface]\nPrivateKey = …\nAddress = …\n\n[Peer]\nPublicKey = …\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = …</string>
+    <string name="msg_wg_profile_delete_confirm">هل تريد حذف ملف تعريف WireGuard هذا؟</string>
+    <string name="msg_wg_profile_scan_hint">وجّه الكاميرا نحو رمز QR الخاص بـ WireGuard الذي يعرضه مزوّد VPN. يتم المسح على جهازك.</string>
+    <string name="msg_wg_profile_scan_no_camera">لا تتوفر كاميرا في هذا الجهاز للمسح</string>
+    <string name="msg_wg_profile_scan_no_camera_permission">إذن الكاميرا مطلوب لمسح رمز QR</string>
+    <string name="msg_wg_profile_scan_failed">تعذّر تشغيل الكاميرا: %1$s</string>
+    <string name="msg_wg_profile_scan_not_config">رمز QR هذا ليس إعدادات WireGuard: %1$s</string>
+    <string name="msg_wg_profile_import_none">لم يُعثر على إعدادات WireGuard في الملف المحدد</string>
+    <string name="msg_wg_profile_import_failed">تعذّرت قراءة الملف المحدد: %1$s</string>
+    <plurals name="msg_wg_profile_imported">
+        <item quantity="zero">لم يُستورد أي ملف تعريف WireGuard (%1$d)</item>
+        <item quantity="one">تم استيراد ملف تعريف WireGuard واحد (%1$d)</item>
+        <item quantity="two">تم استيراد ملفَّي تعريف WireGuard (%1$d)</item>
+        <item quantity="few">تم استيراد %1$d ملفات تعريف WireGuard</item>
+        <item quantity="many">تم استيراد %1$d ملف تعريف WireGuard</item>
+        <item quantity="other">تم استيراد %1$d ملف تعريف WireGuard</item>
+    </plurals>
+    <plurals name="msg_wg_profile_import_skipped">
+        <item quantity="zero">لم يُتخطَّ أي ملف (%1$d)</item>
+        <item quantity="one">تم تخطي ملف واحد (%1$d): ليس إعدادات WireGuard صالحة</item>
+        <item quantity="two">تم تخطي ملفين (%1$d): ليسا إعدادات WireGuard صالحة</item>
+        <item quantity="few">تم تخطي %1$d ملفات: ليست إعدادات WireGuard صالحة</item>
+        <item quantity="many">تم تخطي %1$d ملفًا: ليست إعدادات WireGuard صالحة</item>
+        <item quantity="other">تم تخطي %1$d ملف: ليست إعدادات WireGuard صالحة</item>
+    </plurals>
+    <string name="msg_wg_mullvad_account">رقم حساب Mullvad</string>
+    <string name="msg_wg_mullvad_recommended">الموقع الموصى به</string>
+    <string name="msg_wg_mullvad_note">ينشئ TrackerControl ملف تعريف WireGuard لـ Mullvad. يُحفظ رقم الحساب محليًا لملفات تعريف Mullvad المستقبلية. لا تُخزَّن الرموز المميزة، ولا يؤدي حذف ملف التعريف هنا إلى إزالة الجهاز من Mullvad.</string>
+    <string name="msg_wg_mullvad_generating">جارٍ إنشاء ملف تعريف WireGuard…</string>
+    <string name="msg_wg_mullvad_failed">فشل إعداد Mullvad: %s</string>
+    <string name="msg_wg_mullvad_countries_failed">تعذّر تحميل بلدان Mullvad: %s</string>
+    <string name="msg_wg_proton_note">يستخدم إعداد Proton الموثّق للأطراف الثالثة إعدادات WireGuard القابلة للتنزيل. لا يحتاج TrackerControl إلى بيانات اعتماد Proton الخاصة بك ولا يستطيع تحديث الإعدادات تلقائيًا.\n\nسجّل الدخول في account.protonvpn.com، وانتقل إلى Downloads ← WireGuard configuration، ونزّل ملف إعدادات، وافتحه في محرر نصوص، ثم انسخ محتواه والصقه هنا.</string>
+    <string name="msg_wg_proton_open_dashboard">فتح لوحة تحكم Proton VPN</string>
+    <string name="vpn_status_relay">المرحّل: %s</string>
+    <string name="vpn_status_wireguard_connected">WireGuard متصل</string>
+    <string name="vpn_status_disconnected">غير متصل</string>
+    <string name="vpn_intro_title">معاينة VPN</string>
+    <string name="vpn_intro_body">ترسل VPN حركة الإنترنت عبر خادم آخر. يمكن أن يخفي ذلك عنوان IP الخاص بك عن المواقع ومزوّد الشبكة، ويتيح لك اختيار بلد لاتصالك. هذا التبويب جديد، لذا تعامل معه كمعاينة.</string>
+    <string name="vpn_intro_mullvad_body">مزوّد VPN يركّز على الخصوصية. يكلّف 5 € شهريًا ويستخدم أرقام حسابات بدلًا من عناوين البريد الإلكتروني. أدخل رقم الحساب، ثم اختر بلدًا في TrackerControl.</string>
+    <string name="vpn_intro_ivpn_body">مزوّد VPN يركّز على الخصوصية ويدعم WireGuard. أدخل معرّف حساب IVPN، ثم اختر بلدًا في TrackerControl.</string>
+    <string name="vpn_intro_proton_body">نزّل إعدادات WireGuard من حساب Proton VPN الخاص بك والصقها في TrackerControl. لا تُدخل بيانات اعتماد Proton هنا أبدًا.</string>
+    <string name="vpn_intro_wireguard_body">استخدم هذا الخيار إذا كانت لديك بالفعل إعدادات WireGuard من مزوّد VPN آخر أو من خادمك الخاص أو من مكان عملك.</string>
+    <string name="vpn_enter_mullvad_account">أدخل رقم الحساب</string>
+    <string name="vpn_enter_ivpn_account">أدخل معرّف الحساب</string>
+    <string name="vpn_settings">إعدادات Mullvad</string>
+    <string name="vpn_settings_title">إعدادات Mullvad</string>
+    <string name="vpn_ivpn_settings">إعدادات IVPN</string>
+    <string name="vpn_ivpn_settings_title">إعدادات IVPN</string>
+    <string name="vpn_account_number">الحساب: %s</string>
+    <string name="vpn_account_not_set">الحساب: غير محدد</string>
+    <string name="vpn_account_show">إظهار</string>
+    <string name="vpn_account_hide">إخفاء</string>
+    <string name="vpn_account_change">تغيير</string>
+    <string name="vpn_account_cancel">إلغاء</string>
+    <string name="vpn_mullvad_intro">أدخل رقم حساب Mullvad. يُحفظ على هذا الجهاز.</string>
+    <string name="vpn_mullvad_account_note">يُستخدم هذا الحساب لاتصالات Mullvad حسب البلد.</string>
+    <string name="vpn_get_mullvad_account">الحصول على حساب Mullvad</string>
+    <string name="vpn_get_ivpn_account">الحصول على حساب IVPN</string>
+    <string name="vpn_account_hint">رقم حساب Mullvad</string>
+    <string name="vpn_ivpn_intro">أدخل معرّف حساب IVPN. يُحفظ على هذا الجهاز.</string>
+    <string name="vpn_ivpn_captcha_intro">يحتاج IVPN إلى التحقق عبر CAPTCHA قبل إنشاء جلسة WireGuard.</string>
+    <string name="vpn_ivpn_account_hint">معرّف حساب IVPN</string>
+    <string name="vpn_ivpn_captcha_hint">نص CAPTCHA</string>
+    <string name="vpn_account_save">حفظ</string>
+    <string name="vpn_account_saved">تم حفظ الحساب</string>
+    <string name="vpn_no_wireguard_profiles">لا توجد ملفات تعريف WireGuard مخصصة بعد</string>
+    <string name="vpn_import_wireguard_profile">استيراد ملف تعريف WireGuard</string>
+    <string name="vpn_manage_wireguard_profiles">إدارة ملفات تعريف WireGuard</string>
+    <string name="vpn_country_load_failed">تعذّر تحميل بلدان %1$s: %2$s</string>
+    <string name="vpn_country_load_failed_short">تعذّر تحميل البلدان</string>
+    <string name="vpn_choose_country_first">اختر بلدًا أولًا</string>
+    <string name="vpn_choose_profile_first">اختر ملف تعريف WireGuard أولًا</string>
+    <string name="vpn_setup_required">أعدّ Mullvad أو استورد ملف تعريف WireGuard أولًا</string>
+    <string name="vpn_loading_countries">جار التحميل بلدان…</string>
+    <string name="vpn_generating">جارٍ إنشاء ملف تعريف WireGuard…</string>
+    <string name="vpn_generation_failed">فشل إعداد VPN: %s</string>
+    <string name="vpn_retry">إعادة المحاولة</string>
+    <string name="vpn_country_selected">موافق</string>
+    <string name="msg_wg_blocked_title">نفق WireGuard غير متاح</string>
+    <string name="msg_wg_blocked">الوصول إلى الإنترنت محظور أثناء عدم توفر نفق WireGuard. عطّل إعداد WireGuard لاستعادته.</string>
+    <!-- The cause comes first so it does not read as a tunnel that never
+         started when the detail says it stopped responding. The tail stays
+         neutral about recovery: some causes, such as a lapsed subscription,
+         never resolve on their own. Each %s already names its own remedy
+         where it has one, so this must not repeat it. -->
+    <string name="msg_wg_blocked_detail">%s يظل الوصول إلى الإنترنت محظورًا حتى تُحَل هذه المشكلة، أو حتى يُعطَّل إعداد WireGuard.</string>
+    <string name="msg_wg_identity_renewed_title">أُعيد تسجيل جهاز VPN</string>
+    <string name="msg_wg_identity_renewed">لم يعد %1$s يعرف هذا الجهاز، لذا سجّل TrackerControl جهازًا جديدًا وحدّث ملفات تعريف %1$s على هذا الجهاز.</string>
+    <!-- Ends in a full stop: msg_wg_blocked_detail appends a sentence after it. -->
+    <string name="msg_wg_provider_rejected">رفض %1$s إعداد هذا الجهاز: %2$s.</string>
+    <string name="msg_wg_account_expired">أفاد %1$s بأنه لا يوجد وقت متبقٍّ في هذا الحساب، لذا لن يقبل أي خادم النفق حتى يُضاف وقت.</string>
+    <string name="msg_wg_recovery_failed">توقف WireGuard عن الاستجابة، ويحاول TrackerControl إعادة الاتصال.</string>
+    <string name="summary_log_logcat">يعطّل وضع البحث حظر أدوات التتبع. تُسجَّل أدوات التتبع المكتشفة في ADB ويُفعَّل استخراج SNI لتحسين اكتشاف أسماء المضيفين. استرجع السجلات باستخدام adb logcat مع الوسم \'TC-Log\'.</string>
+    <string name="msg_research_mode_notice">وضع البحث قيد التشغيل. حظر أدوات التتبع معطّل. اضغط لتغيير الإعدادات.</string>
+    <string name="msg_sure">هل أنت متأكد؟</string>
+    <string name="msg_started">البحث عن أدوات التتبع…</string>
+    <string name="msg_waiting">انتظار الحدث</string>
+    <string name="msg_disabled">استخدم المفتاح أعلاه لتمكين التحكم في التتبع.</string>
+    <string name="msg_revoked">تم فصل TrackerControl، على الأرجح بواسطة تطبيق VPN آخر أو النظام. اضغط لإعادة الاتصال.</string>
+    <string name="msg_installed">هل هناك مشاكل مع %1$s؟</string>
+    <string name="msg_installed_description">السماح للتطبيق بالاتصال بالشركات</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="msg_installed_tracker_libraries_found" tools:ignore="PluralsCandidate">يحتوي على %d مكتبة تتبع</string>
+    <string name="msg_completed">اكتمل الإجراء</string>
+    <string name="msg_no_file_manager">لم يُعثر على مدير ملفات لاختيار ملف.</string>
+    <string name="msg_no_browser">لم يُعثر على تطبيق متصفح لفتح الرابط.</string>
+    <string name="msg_vpn">يستخدم التحكم في التتبع VPN محليًا لتصفية حركة مرور الإنترنت.\nلهذا السبب، يرجى السماح باتصال VPN في مربع الحوار التالي.\nلا يتم إرسال حركة مرور الإنترنت الخاصة بك إلى خادم VPN بعيد.</string>
+    <string name="msg_autostart">تعذر بدء التحكم في التتبع تلقائيًا. من المحتمل أن يكون هذا بسبب خطأ في إصدار Android الخاص بك.</string>
+    <string name="msg_error">حدث خطأ غير متوقع: \'%s\'</string>
+    <string name="msg_native_fd_recovery_exhausted">نفدت واصفات الملفات في VPN مرارًا. توقفت الحماية بعد فشل كل محاولات إعادة التشغيل التلقائية.</string>
+    <string name="msg_native_fd_error">نفدت واصفات الملفات في VPN. أغلق التطبيقات غير المستخدمة أو أعد تشغيل جهازك، ثم أعد تشغيل الحماية.</string>
+    <string name="msg_vpn_replacement_recovery_exhausted">تعذّر على TrackerControl إعادة إنشاء VPN. يتم حظر حركة المرور.</string>
+    <string name="msg_doh_unreachable">تعذّر الوصول إلى DNS الآمن (DoH) رغم وجود اتصال نشط بالإنترنت. إذا تكرر ذلك، ففكّر في تعطيله من إعدادات الشبكة.</string>
+    <string name="msg_start_failed">رفض Android بدء خدمة VPN في الوقت الحالي. من المحتمل أن يكون هذا بسبب خطأ في إصدار Android الخاص بك.</string>
+    <string name="msg_try">جرب التحكم في التتبع</string>
+    <string name="msg_log_disabled">تم تعطيل تسجيل حركة المرور، استخدم المفتاح أعلاه لتمكين التسجيل. قد يؤدي تسجيل حركة المرور إلى زيادة استهلاك البطارية.</string>
+    <string name="msg_clear_activity">يؤدي هذا إلى إزالة النشاط المسجَّل لهذا التطبيق. تبقى إعدادات الحظر/السماح لكل أداة تتبع لهذا التطبيق.</string>
+    <string name="msg_update_last">آخر تحديث: %s</string>
+    <string name="msg_metered">الشبكة مقننة</string>
+    <string name="msg_inactive">لا يوجد اتصال إنترنت نشط</string>
+    <string name="msg_queue">التحكم في التتبع مشغول</string>
+    <string name="msg_update">التحديث متاح، انقر للتنزيل</string>
+    <string name="title_version">الإصدار %1$d</string>
+    <string name="msg_push">تتم معالجة الرسائل الواردة (الرسائل الفورية) في الغالب بواسطة مكون نظام خدمات Play، والذي يُسمح له بالوصول إلى الإنترنت افتراضيًا</string>
+    <string name="msg_system">يمكن تمكين إدارة جميع تطبيقات (النظام) في الإعدادات</string>
+    <string name="msg_vpn_cancelled">تم إلغاء اتصال VPN\nهل قمت بتكوين VPN آخر ليكون VPN يعمل دائمًا؟</string>
+    <string name="msg_unavailable">هذه الميزة غير متاحة في إصدار Android هذا</string>
+    <string name="msg_always_on">تم تعيين VPN آخر كـ VPN يعمل دائمًا</string>
+    <string name="msg_always_on_lockdown">عطّل \"حظر الاتصالات بدون VPN\" في إعدادات VPN في Android لاستخدام TrackerControl</string>
+    <string name="msg_start_forward">بدء إعادة التوجيه من منفذ %2$d الخاص بـ %1$s إلى %4$d:%3$s الخاص بـ \'%5$s\'؟</string>
+    <string name="msg_stop_forward">إيقاف إعادة توجيه منفذ %2$d الخاص بـ %1$s؟</string>
+    <string name="msg_log_logcat">تحذير: تم تعطيل الحظر بسبب تسجيل ADB.</string>
+    <string-array name="protocolNames">
+        <item>UDP</item>
+        <item>TCP</item>
+    </string-array>
+    <string name="menu_add">إضافة</string>
+    <string name="menu_delete">حذف</string>
+    <string name="setting_forwarding">إعادة توجيه المنفذ</string>
+    <string name="title_protocol">البروتوكول</string>
+    <string name="title_dport">منفذ المصدر</string>
+    <string name="title_raddr">عنوان الوجهة</string>
+    <string name="title_rport">منفذ الوجهة</string>
+    <string name="title_ruid">تطبيق الوجهة</string>
+    <string name="title_external">بالنسبة لخادم خارجي، حدد \"لا أحد\"</string>
+    <string name="title_unmetered_allowed">يسمح بمرور حركة المرور غير المقننة</string>
+    <string name="title_unmetered_blocked">تم حظر حركة المرور غير المقننة</string>
+    <string name="title_unmetered_disabled">قواعد المرور غير المقننة غير مطبقة</string>
+    <string name="title_metered_allowed">يسمح بمرور حركة المرور المقننة</string>
+    <string name="title_metered_blocked">تم حظر حركة المرور المقننة</string>
+    <string name="title_metered_disabled">قواعد المرور المقننة غير مطبقة</string>
+    <string name="title_host_allowed">العنوان مسموح به</string>
+    <string name="title_host_blocked">العنوان محظور</string>
+    <string name="title_interactive_allowed">السماح عند تشغيل الشاشة</string>
+    <string name="title_roaming_blocked">الحظر عند التجوال</string>
+    <string name="title_metered">بشكل افتراضي، يعتبر اتصال Wi-Fi غير مقنن واتصال الهاتف المحمول مقنن</string>
+    <string name="title_rate">تقييم</string>
+    <string name="title_allow">السماح</string>
+    <string name="title_block">حظر</string>
+    <string name="title_nobody">لا أحد</string>
+    <string name="title_log_whois">Whois %1$s</string>
+    <string name="title_log_port">منفذ %1$d</string>
+    <string name="title_log_copy">نسخ</string>
+    <!-- App Overview -->
+    <string name="tracked_app_icon">تعطيل الوصول إلى الإنترنت لهذا التطبيق</string>
+    <string name="tracked_app_name">اسم التطبيق</string>
+    <!-- Dynamic content descriptions for the app-icon Internet toggle in the app list (issue #231) -->
+    <string name="toggle_block_internet_description">حظر الوصول إلى الإنترنت لـ %1$s</string>
+    <string name="toggle_allow_internet_description">السماح بالوصول إلى الإنترنت لـ %1$s</string>
+    <string name="toggle_no_internet_description">%1$s ليس لديه وصول إلى الإنترنت</string>
+    <string name="toggle_internet_unavailable_description">التحكم في الوصول إلى الإنترنت غير متاح لـ %1$s</string>
+    <!-- Dynamic content description for the per-category tracker-blocking switch -->
+    <string name="toggle_block_category_description">حظر أدوات التتبع للفئة %1$s</string>
+    <!-- Dynamic content description for the home-screen widget toggle (accessibility follow-up, issue #636) -->
+    <string name="widget_toggle_enable_description">تفعيل حظر أدوات التتبع</string>
+    <string name="widget_toggle_disable_description">تعطيل حظر أدوات التتبع</string>
+    <string name="accessibility_tracker_blocking_enabled">حظر أدوات التتبع مفعّل</string>
+    <string name="accessibility_tracker_blocking_disabled">حظر أدوات التتبع معطّل</string>
+    <plurals name="n_companies_found_week">
+        <item quantity="zero">اتصلت بـ %d شركة في الأسبوع الماضي</item>
+        <item quantity="one">اتصلت بـ %d شركة في الأسبوع الماضي</item>
+        <item quantity="two">اتصلت بـ %d شركتين في الأسبوع الماضي</item>
+        <item quantity="few">اتصلت بـ %d شركات في الأسبوع الماضي</item>
+        <item quantity="many">اتصلت بـ %d شركة في الأسبوع الماضي</item>
+        <item quantity="other">اتصلت بـ %d شركة في الأسبوع الماضي</item>
+    </plurals>
+    <plurals name="n_companies_found">
+        <item quantity="zero">اتصلت بـ %d شركة في كل الأوقات</item>
+        <item quantity="one">اتصلت بـ %d شركة في كل الأوقات</item>
+        <item quantity="two">اتصلت بـ %d شركتين في كل الأوقات</item>
+        <item quantity="few">اتصلت بـ %d شركات في كل الأوقات</item>
+        <item quantity="many">اتصلت بـ %d شركة في كل الأوقات</item>
+        <item quantity="other">اتصلت بـ %d شركة في كل الأوقات</item>
+    </plurals>
+    <string name="confirm_ipinfo_title">هل تريد استرداد معلومات المؤسسة؟</string>
+    <string name="confirm_ipinfo">سيؤدي هذا إلى الاتصال بالخدمة الخارجية ipinfo.io، ومشاركة بيانات حول عناوين IP التي تم الاتصال بها معهم.</string>
+    <string name="external_servers">هل تريد الحصول على البريد الإلكتروني للمطور تلقائيًا؟</string>
+    <string name="confirm_google_info">يمكن لهذا التطبيق الحصول تلقائيًا على البريد الإلكتروني لمطور التطبيق من متجر Google Play من أجلك.</string>
+    <string name="ok">موافق</string>
+    <string name="yes">نعم</string>
+    <string name="no">لا</string>
+    <string name="menu_csv">تصدير كملف CSV</string>
+    <string name="exporting">جاري التصدير..</string>
+    <string name="export_failed">فشل التصدير</string>
+    <string name="exported">تم التصدير إلى وحدة التخزين!</string>
+    <!-- App Details -->
+    <string name="title_activity_detail">التفاصيل</string>
+    <string name="tab_trackers">أدوات التتبع</string>
+    <string name="tab_countries">البلدان</string>
+    <string name="tab_actions">حقوق البيانات</string>
+    <string name="app_info">إدارة التطبيق</string>
+    <!-- Actions -->
+    <string name="block_tracking">حظر أدوات التتبع</string>
+    <string name="block_tracking_description">ترسل العديد من التطبيقات بيانات إلى أطراف ثالثة، وهي ما يسمى بأدوات التتبع. يتيح التحكم في التتبع حظر عمليات النقل عبر الشبكة هذه بشكل انتقائي. ومع ذلك، استخدم هذا بحكمة، لأن مطوري التطبيقات يعتمدون على هذه الخدمات، وخاصة الإعلانات.</string>
+    <string name="personalised_ads">تقييد التخصيص</string>
+    <string name="personalised_ads_description">يتيح Android تقييد وصول التطبيقات إلى معرف الإعلانات من Google لجهازك. ومع ذلك، يمكن للتطبيقات أن تتجاهل هذا الإعداد، وتظل تستخدم هذا المعرف. يمكنهم أيضًا الاستمرار في جمع هذا المعرف لأغراض التحليل، وفقًا لسياسات Google. أنت بحاجة إلى الثقة في Google والشركة التي تجمع البيانات.</string>
+    <string name="data_managment">إدارة البيانات</string>
+    <string name="data_management_description">تسمح اللائحة العامة لحماية البيانات للاتحاد الأوروبي (GDPR) للمستخدمين من الاتحاد الأوروبي بإدارة أي بيانات متعلقة بهم. يوفر هذا التطبيق قوالب بريد إلكتروني للتواصل مع المطور. يجب على المطور الرد في غضون شهر واحد.</string>
+    <string name="contacts">جهة الاتصال</string>
+    <string name="contacts_description">إذا كنت تعتقد أن أحد التطبيقات ينتهك مبادئ حماية البيانات، فقد ترغب في الاتصال بالكيانات المسؤولة مباشرة.</string>
+    <string name="play_services_required">هذا إعداد لخدمات Google Play، والتي لم يتم العثور عليها على جهازك.</string>
+    <string name="no_mail_service">يرجى تثبيت عميل بريد إلكتروني.</string>
+    <string name="ad_settings">تغيير الآن</string>
+    <string name="request_data">طلب البيانات</string>
+    <string name="request_deletion">طلب الحذف</string>
+    <string name="contact_developer">المطور</string>
+    <string name="contact_playstore">جوجل</string>
+    <string name="contact_officials">مسؤولو الاتحاد الأوروبي</string>
+    <string name="google_dpo_mail">data-protection-office@google.com</string>
+    <string name="dpas_overview_url">https://edpb.europa.eu/about-edpb/board/members</string>
+    <string name="subject_request_data">طلب الوصول إلى البيانات بموجب اللائحة العامة لحماية البيانات</string>
+    <string name="body_request_data"><![CDATA[إلى من يهمه الأمر:\n
+\n
+\n
+أطلب منكم، بصفتكم المتحكم في البيانات لتطبيق Android %1$s (المعرف: %2$s)، التأكيد ما إذا كان يعالج أي بيانات شخصية عني.\n
+إذا كان الأمر كذلك، فيرجى تزويدي بجميع المعلومات المطلوبة المنصوص عليها في المادة 15 من اللائحة العامة لحماية البيانات للاتحاد الأوروبي (GDPR)، بما في ذلك:\n
+\n
+• نسخة من بياناتي الشخصية؛\n
+• أغراض المعالجة؛\n
+• فئات البيانات الشخصية المعنية؛\n
+• المستلمين الذين تكشف لهم بياناتي الشخصية والضمانات التي تقدمها؛\n
+• فترة الاحتفاظ لتخزين بياناتي الشخصية أو المعايير المستخدمة لتحديد هذه الفترة؛\n
+• معلومات حول مصدر بياناتي الشخصية؛ و\n
+• وجود اتخاذ قرار آلي (بما في ذلك التنميط)، وإذا كان الأمر كذلك:\n
+    - المنطق المتبع في عملية صنع القرار؛\n
+    - الأهمية والعواقب المتوقعة بالنسبة لي؛\n
+    - الخطوات التي اتخذتها لمنع الأخطاء والتحيز والتمييز؛ و\n
+    - شرح كيف يمكنني التعبير عن وجهة نظري والطعن في القرار.\n
+\n
+يتعلق هذا الطلب بأي معالجة لبياناتي الشخصية من قبلك، بما في ذلك أي معالجات تعالج البيانات الشخصية نيابة عنك.\n
+\n
+يرجى تقديم ردكم بوسائل آمنة عبر البريد الإلكتروني. أتطلع إلى تلقي رد في غضون شهر واحد من استلام طلبي.\n
+\n
+مع خالص التقدير،\n\n]]></string>
+    <string name="body_delete_data"><![CDATA[إلى من يهمه الأمر:\n
+\n
+\n
+أنا أستدعي حقي في المحو كما هو محدد في المادة 17 من اللائحة العامة لحماية البيانات للاتحاد الأوروبي (GDPR). أطلب منكم، بصفتكم المتحكم في البيانات لتطبيق Android %1$s (المعرف: %2$s)، محو البيانات الشخصية التالية التي يعالجها عني دون تأخير لا مبرر له:\n
+• جميع البيانات.\n
+\n
+السبب في طلب الإزالة الخاص بي هو أنني أسحب أو سحبت موافقتي على معالجة البيانات الشخصية. يتعلق هذا الطلب بأي معالجة لبياناتي الشخصية من قبلك، بما في ذلك أي معالجات تعالج البيانات الشخصية نيابة عنك.\n
+\n
+يرجى تقديم ردكم بوسائل آمنة عبر البريد الإلكتروني. أتطلع إلى تلقي رد في غضون شهر واحد من استلام طلبي.\n
+\n
+مع خالص التقدير،\n\n]]></string>
+    <string name="crash_dialog_text">عذرًا. لقد تعطل التحكم في التتبع للتو.. هل تمانع في إرسال بريد إلكتروني إلينا بالتفاصيل؟</string>
+    <string name="crash_dialog_comment">هل هناك أي تعليقات؟</string>
+    <string name="instructions_monitoring_private_dns">بدّل المفتاح وتفاعل مع بعض التطبيقات. يجب تعطيل DNS الخاص.</string>
+    <string name="instructions_monitoring">بدّل المفتاح وتفاعل مع بعض التطبيقات.</string>
+    <string name="device_not_supported_title">الجهاز غير مدعوم</string>
+    <string name="device_not_supported_msg">لا يسمح نظام تشغيل جهازك بمراقبة وتصفية اتصالات الشبكة. هذا مطلوب للتحكم في التتبع.</string>
+    <string name="launch_app">تشغيل والعثور على أدوات التتبع</string>
+    <string name="launch_app_failed">لا يمكن تشغيل هذا التطبيق</string>
+    <string name="countries">بلدان الوجهة</string>
+    <string name="countries_explanation">اكتشف أين يرسل هاتفك بيانات التتبع.\n\nتستند المعلومات إلى عمليات بحث DNS ومعلومات IP، وقد تكون غير دقيقة.</string>
+    <string name="countries_loading_failed">عفوًا.. فشل تحميل خريطة البلدان. يرجى إخبار tc@kollnig.net كيف حدث ذلك.</string>
+    <string name="countries_map_highlighted">وجهات التتبع المميّزة: %1$s</string>
+    <string name="countries_map_none">لا توجد وجهات تتبع مميّزة.</string>
+    <string name="tracker_advertising">إعلانات</string>
+    <string name="tracker_analytics">تحليلات</string>
+    <string name="tracker_content">أساسي</string>
+    <string name="tracker_cryptomining">تعدين العملات المشفرة</string>
+    <string name="tracker_fingerprinting">بصمة الإصبع</string>
+    <string name="tracker_social">اجتماعي</string>
+    <string name="tracker_email">بريد إلكتروني</string>
+    <string name="tracker_consent">إدارة الموافقة</string>
+    <string name="tracker_uncategorised">غير مصنف</string>
+    <string name="setting_blocking_mode">وضع الحظر</string>
+    <string name="summary_blocking_mode_minimal">الأدنى: يحظر فقط أدوات التتبع من قائمة DuckDuckGo التي يكون حظرها آمنًا. تبقى المتصفحات موجَّهة عبر VPN، لكن حماية التتبع معطّلة افتراضيًا. التطبيقات غير المتوافقة المعروفة مستثناة. تعطّل محدود للتطبيقات.</string>
+    <string name="summary_blocking_mode_standard">القياسي: يحظر جميع أدوات التتبع المعروفة من عدة قوائم (X-Ray وDisconnect وDuckDuckGo). الخدمات الأساسية مسموح بها. إذا توقف تطبيق عن العمل، فعدّل إعداد الحماية الخاص به (راجع استكشاف الأعطال في قائمة التطبيق).</string>
+    <string name="summary_blocking_mode_strict">الصارم: يحظر جميع أدوات التتبع المعروفة بما في ذلك الخدمات الأساسية والنطاقات الملتبسة ذات عناوين IP المشتركة. ستحتاج تطبيقات كثيرة إلى إعداد حماية أقل تقييدًا (راجع استكشاف الأعطال في قائمة التطبيق).</string>
+    <string name="summary_sni_wg_note">ملاحظة: لا ينطبق استخراج SNI على الحركة الموجَّهة عبر VPN البعيد.</string>
+    <string name="blocking_mode_minimal">حد أدنى</string>
+    <string name="blocking_mode_standard">قياسي</string>
+    <string name="blocking_mode_strict">صارم</string>
+    <string name="onboarding_blockingmode_title">اختر وضع الحظر</string>
+    <string name="onboarding_blockingmode_desc">اختر كيف يتعامل TrackerControl مع أدوات التتبع. تحظر أوضاع الحظر أدوات التتبع بمستويات متفاوتة من الصرامة؛ أما وضع البحث فيُبقي الحظر معطّلًا ويفعّل استخراج SNI لأغراض القياس فقط. يمكنك تغيير ذلك لاحقًا في الإعدادات.</string>
+    <string name="onboarding_blockingmode_minimal_label">الأدنى (موصى به للمستخدمين الجدد)</string>
+    <string name="onboarding_blockingmode_minimal_desc">يحظر فقط أدوات التتبع المؤكدة التي يكون حظرها آمنًا. تعطّل محدود للتطبيقات. مناسب لمعظم المستخدمين.</string>
+    <string name="onboarding_blockingmode_standard_label">قياسي</string>
+    <string name="onboarding_blockingmode_standard_desc">يحظر جميع أدوات التتبع المعروفة من عدة قوائم. قد تحتاج بعض التطبيقات إلى إعداد حماية أقل تقييدًا.</string>
+    <string name="onboarding_blockingmode_strict_label">صارم</string>
+    <string name="onboarding_blockingmode_strict_desc">يحظر كل شيء بما في ذلك الخدمات الأساسية والنطاقات الملتبسة. تعطّل كبير للتطبيقات — ستحتاج تطبيقات كثيرة إلى إعداد حماية أقل تقييدًا.</string>
+    <string name="onboarding_blockingmode_research_label">بحث</string>
+    <string name="onboarding_blockingmode_research_desc">بلا حظر لأدوات التتبع. يسجّل عمليات الإرسال في ADB ويفعّل استخراج SNI لاكتشاف أفضل لأسماء المضيفين. للبحث فقط: يؤدي هذا إلى تسريب عنوان IP الخاص بك لخوادم أدوات التتبع.</string>
+    <!-- Per-app remote VPN routing -->
+    <string name="setting_wg_route_mode">التوجيه عبر VPN البعيد</string>
+    <string name="summary_wg_route_mode">أي التطبيقات تُمرَّر عبر VPN البعيد. التطبيقات التي لا تُمرَّر تبقى مراقَبة ومُرشَّحة بالكامل — لكنها تتصل من شبكة هذا الجهاز.</string>
+    <string name="wg_route_mode_all">كل التطبيقات</string>
+    <string name="wg_route_mode_selected">التطبيقات المحددة فقط</string>
+    <string name="app_route_through">عبر VPN البعيد</string>
+    <string name="app_route_through_explanation">يتصل هذا التطبيق عبر VPN البعيد الخاص بك، الذي يرى حركته بدلاً من شبكتك.</string>
+    <string name="app_route_direct">مباشرةً من هذا الجهاز</string>
+    <string name="app_route_direct_explanation">يتصل هذا التطبيق من شبكتك. تظل مراقبة أدوات التتبع وحظرها سارية. تذهب استعلامات DNS الخاصة به إلى محلل شبكتك بدلاً من محلل VPN، ويرى العنوان الحقيقي لهذا الجهاز — بعض التطبيقات تحتاج ذلك، مثلاً للوصول إلى الأجهزة المحلية أو فحص بوابة الاتصال.</string>
+    <string name="app_route_unavailable_no_vpn">لا يوجد VPN بعيد مُعد، لذا فإن كل الحركة تغادر هذا الجهاز مباشرةً بالفعل.</string>
+    <string name="app_route_unavailable_bypassed">يتجاوز هذا التطبيق TrackerControl تمامًا، لذا لا توجد حركة لتوجيهها.</string>
+    <string name="app_route_unavailable_partial_routes">لا ينقل VPN البعيد كل الحركة (قيمة AllowedIPs لديه ليست نفقًا كاملاً). يتطلب التوجيه لكل تطبيق نفقًا كاملاً، لأن المسارات مشتركة بين كل التطبيقات.</string>
+    <!-- Per-app protection state -->
+    <string name="app_state_heading">وضع الحظر</string>
+    <string name="app_state_title_minimal">الحظر الأدنى</string>
+    <string name="app_state_title_standard">الحظر القياسي</string>
+    <string name="app_state_title_strict">الحظر الصارم</string>
+    <string name="app_state_subtitle_misbehaving">التطبيق لا يعمل جيدًا؟ بدّل إلى الحظر الأدنى هنا.</string>
+    <string name="app_state_protected">محمي</string>
+    <string name="app_state_protected_explanation">يتم حظر أدوات التتبع وتسجيلها لهذا التطبيق.</string>
+    <string name="app_state_essential_only">الحظر الأدنى فقط</string>
+    <string name="app_state_essential_only_explanation">يحظر فقط أدوات التتبع المؤكدة التي يحظرها الوضع الأدنى. تُسجَّل أدوات التتبع الأخرى لكنها مسموح بها. استخدم هذا إذا كان الحظر القياسي يعطّل التطبيق.</string>
+    <string name="app_state_trackers_allowed">السماح بأدوات التتبع</string>
+    <string name="app_state_trackers_allowed_explanation">يواصل التطبيق العمل عبر TrackerControl، لكن أدوات التتبع الخاصة به لا تُحظر ولا تُسجَّل. استخدم هذا الخيار إذا كان الحظر يُعطِّل التطبيق.</string>
+    <string name="app_state_no_internet">بلا إنترنت</string>
+    <string name="app_state_no_internet_explanation">جميع اتصالات هذا التطبيق محظورة. يمكنك أيضًا الضغط على أيقونة التطبيق في الشاشة الرئيسية.</string>
+    <string name="app_state_no_internet_shared_uid">ينطبق أيضًا على %1$s، الذي يشارك هذا التطبيق مُعرِّف مستخدم أندرويد.</string>
+    <string name="app_state_bypassed">تجاوز TrackerControl</string>
+    <string name="app_state_bypassed_explanation">يتصل التطبيق مباشرةً، خارج TrackerControl. لا تتم مراقبة أو حظر أي شيء له. استخدم هذا كملاذ أخير إذا كان التطبيق لا يزال لا يعمل.\n\nملاحظة: يجب تعطيل \"حظر الاتصالات بدون VPN\" في إعدادات VPN بنظام أندرويد حتى يعمل هذا.</string>
+    <!-- Per-app protection screen -->
+    <string name="protection_title">حماية</string>
+    <string name="protection_route_heading">VPN البعيد</string>
+    <!-- Protection state and remote-VPN routing shown together on one row -->
+    <string name="protection_app_not_working">التطبيق لا يعمل؟ اضغط هنا</string>
+    <plurals name="protection_paused_resumes">
+        <item quantity="zero">متوقف مؤقتًا — يُستأنف خلال %d دقيقة</item>
+        <item quantity="one">متوقف مؤقتًا — يُستأنف خلال %d دقيقة</item>
+        <item quantity="two">متوقف مؤقتًا — يُستأنف خلال %d دقيقتين</item>
+        <item quantity="few">متوقف مؤقتًا — يُستأنف خلال %d دقائق</item>
+        <item quantity="many">متوقف مؤقتًا — يُستأنف خلال %d دقيقة</item>
+        <item quantity="other">متوقف مؤقتًا — يُستأنف خلال %d دقيقة</item>
+    </plurals>
+    <string name="protection_resume">استئناف الآن</string>
+    <string name="protection_pause_shared_uid">إيقاف هذا التطبيق مؤقتًا يوقف %1$s أيضًا لأنهما يشتركان في معرّف مستخدم Android نفسه.</string>
+    <string name="protection_pause_lockdown_warning">قفل Android مفعّل. سيؤدي إيقاف هذا التطبيق مؤقتًا إلى حظر اتصالاته حتى تُستأنف الحماية.</string>
+    <string name="protection_lockdown_note">لا يكشف Android حالة القفل هنا. إذا كان خيار &quot;حظر الاتصالات بدون VPN&quot; مفعّلًا، فقد يفقد التطبيق الموقوف مؤقتًا إمكانية الوصول إلى الشبكة.</string>
+    <string name="protection_blocked_last_24h">المحظور خلال آخر 24 ساعة</string>
+    <string name="protection_no_blocked_trackers">لم يُحظر شيء مؤخرًا — على الأرجح ليست المشكلة من TrackerControl.</string>
+    <string name="protection_recording_unavailable">تسجيل أدوات التتبع غير متاح لأن &quot;البحث عن أدوات التتبع الجديدة&quot; معطّل.</string>
+    <string name="protection_temporary">مؤقت، أثناء الإيقاف المؤقت</string>
+    <string name="uninstall">إلغاء التثبيت</string>
+    <string name="settings_uninstall">إعدادات التطبيق وإلغاء التثبيت</string>
+    <string name="no_trackers_found_message_disabled">قم بتمكين المفتاح في الشاشة الرئيسية، ثم قم بتشغيل التطبيق للعثور على أدوات التتبع</string>
+    <string name="no_trackers_found_message">قم بتشغيل التطبيق للعثور على أدوات التتبع</string>
+    <string name="no_trackers_found_action">تشغيل</string>
+    <string name="no_internet_message">"لا يمكن لهذا التطبيق الوصول إلى الإنترنت. قد يظل يتتبعك عن طريق تبادل البيانات مع تطبيقات أخرى."</string>
+    <string name="no_internet">لا يوجد وصول إلى الإنترنت</string>
+    <string name="bypass_vpn_error">"لا يمكن حظر الإنترنت بينما يتجاوز التطبيق TrackerControl."</string>
+    <string name="back">رجوع</string>
+    <string name="forever_free">مجاني دائمًا</string>
+    <string name="your_privacy">خصوصيتك</string>
+    <string name="tracker_hostlist">المضيفون المعرفون من قبل المستخدم</string>
+    <string name="internet_blocked">تم حظر الوصول إلى الإنترنت</string>
+    <string name="internet_unblocked">تم إلغاء حظر الوصول إلى الإنترنت</string>
+    <string name="category_unblocked">تم السماح بأدوات التتبع في الفئة</string>
+    <string name="category_unblocked_warning">مسموح به مع هذه الفئة — احظر الفئة لتغيير شركات بعينها.</string>
+    <string name="tracking_detection_failed">فشل اكتشاف مكتبة التتبع.</string>
+    <string name="tracking_detection_failed_ram">فشل اكتشاف مكتبة التتبع. الذاكرة العشوائية غير كافية.</string>
+    <string name="tracking_detection_failed_report">فشل اكتشاف مكتبة التتبع. يرجى الإبلاغ عن هذه المشكلة للمطور.</string>
+    <string name="detected_trackers">مكتبات التتبع المكتشفة: %s</string>
+    <string name="analyzing_classes_progress">جارٍ تحليل الفئات… %d%%</string>
+    <string name="none">لا شيء</string>
+    <string name="trackers_static_explanation">يكتشف التحكم في التتبع التتبع في التعليمات البرمجية (\"المكتبات\") وحركة مرور الشبكة للتطبيقات.\n\nيمكن حظر التتبع الذي يتم اكتشافه في حركة مرور الشبكة باستخدام التحكم في التتبع.</string>
+    <string name="trackers_static_explanation_playstore">يكتشف التحكم في التتبع التتبع في التعليمات البرمجية (\"المكتبات\") وحركة مرور الشبكة للتطبيقات.</string>
+    <string name="trackers_static_disclaimer">ملاحظة: اكتشاف كود مكتبة التتبع لا يعني أنها مستخدمة فعليًا. ربما أزالت بعض التطبيقات هذه المكتبات أو عطّلتها، لكن لا تزال آثارها قابلة للاكتشاف.</string>
+    <string name="analyze_tracker_libraries">تحليل مكتبات التتبع</string>
+    <string name="update_analysis">تحديث التحليل</string>
+    <string name="analysis_outdated_version">\n\nملاحظة: التحليل لإصدار سابق من التطبيق. ربما تغيّرت مكتبات التتبع المدمجة.</string>
+    <!-- Tracker library screen, reached from the summary row on the Trackers tab -->
+    <string name="libraries_title">مكتبات التتبع</string>
+    <string name="libraries_row_heading">مكتبات التتبع</string>
+    <string name="libraries_none_found">لم يُعثر على مكتبات تتبع في كود التطبيق</string>
+    <string name="libraries_not_analysed">لم يُحلَّل بعد</string>
+    <string name="libraries_analysing">جارٍ تحليل كود التطبيق\u2026</string>
+    <string name="libraries_analysis_failed">فشل التحليل \u2014 اضغط لإعادة المحاولة</string>
+    <string name="libraries_outdated_suffix">%1$s (إصدار التطبيق السابق)</string>
+    <string name="detected_tracker_libraries_heading">المكتشَف في كود التطبيق</string>
+    <string name="tracker_libraries_source">مواقع من بيانات أدوات التتبع لدى Exodus Privacy</string>
+    <string name="open_tracker_website">فتح موقع %1$s</string>
+    <plurals name="libraries_found">
+        <item quantity="zero">لم يتم العثور على مكتبات تتبع في كود التطبيق (%d)</item>
+        <item quantity="one">تم العثور على مكتبة تتبع واحدة (%d) في كود التطبيق</item>
+        <item quantity="two">تم العثور على مكتبتي تتبع (%d) في كود التطبيق</item>
+        <item quantity="few">تم العثور على %d مكتبات تتبع في كود التطبيق</item>
+        <item quantity="many">تم العثور على %d مكتبة تتبع في كود التطبيق</item>
+        <item quantity="other">تم العثور على %d مكتبة تتبع في كود التطبيق</item>
+    </plurals>
+    <string name="analysis_queued">التحليل في قائمة الانتظار…</string>
+    <string name="blocked">محظور</string>
+    <string name="allowed">مسموح</string>
+    <string name="allowed_shared_ip">مسموح به — عنوان IP مشترك؛ فعّل الوضع الصارم للحظر</string>
+    <string name="tracker_monitored_minimal">قيد المراقبة — غير محظور في الوضع الأدنى</string>
+    <string name="setting_domain_based_blocked">الحظر المستند إلى المجال</string>
+    <string name="summary_domain_based_blocking">يسمح بحظر أكثر دقة. لا يزال قيد التطوير.</string>
+    <string name="uncertain_entry">قد تكون الإدخالات التي تحمل علامة \"*\" غير دقيقة، نظرًا لقيود Android. يعني هذا عادةً أن الشركة نفسها تستخدم نفس عنوان IP ضمن نطاقات مختلفة، ولكن قد يعني أيضًا أن شركات مختلفة تقف وراء نفس عنوان IP (على سبيل المثال، إذا كانت تستخدم شبكة توصيل المحتوى).</string>
+    <string name="browsers_not_supported">تم اكتشاف متصفح ⚠️</string>
+    <string name="browsers_not_supported_explanation">يبدو أن هذا تطبيق متصفح.\n\nتعمل حماية التتبع في المتصفح بأفضل شكل داخل المتصفح نفسه، حيث يمكن حظر أدوات التتبع على مستوى الصفحة والطلب. يُبقي TrackerControl حركة المتصفح موجَّهة عبر نفق VPN/WireGuard، لكن حظر أدوات التتبع على مستوى التطبيق معطّل افتراضيًا وقد يتسبب في تعطل المواقع إذا فُعِّل.</string>
+    <string name="msg_notifications">انقر لمنح أذونات الإشعارات (لرسائل الخطأ، إلخ.)</string>
+    <string name="msg_local_network">اضغط للسماح بالوصول إلى الشبكة المحلية، الذي يسأل عنه Android باسم \"الأجهزة القريبة\". يحجبه Android 17 افتراضيًا، لذلك يتعذر الوصول إلى خادم DNS الخاص بك أو مُحلِّل DNS الآمن أو نظير WireGuard أو الوكيل.</string>
+    <string name="msg_local_network_title">الوصول إلى الشبكة المحلية مطلوب</string>
+    <string name="msg_local_network_notify">لا يستطيع TrackerControl الوصول إلى خادم DNS الخاص بك أو مُحلِّل DNS الآمن أو نظير WireGuard أو الوكيل، لذا قد يفشل تحليل الأسماء. يتطلب Android 17 إذنًا لذلك، ويسأل عنه باسم \"الأجهزة القريبة\". اضغط لفتح TrackerControl والسماح به.</string>
+    <string name="msg_private_dns_title">DNS الخاص يحجب تحليل الأسماء</string>
+    <string name="msg_private_dns_notify">تم ضبط \"DNS الخاص\" في Android على %1$s، ويحظر TrackerControl DNS المشفّر ليتمكن من اكتشاف أدوات التتبع. لا يعود Android إلى DNS العادي في هذا الوضع، لذلك لن يتحمّل شيء. اضغط لضبط DNS الخاص على \"تلقائي\" أو \"إيقاف\" — يوفّر TrackerControl DNS الآمن الخاص به في الإعدادات.</string>
+    <string name="msg_private_dns_unknown_resolver">مُحلِّل مخصص</string>
+    <string name="msg_private_dns_row">لن يتحمّل شيء: تم ضبط \"DNS الخاص\" في Android على مُحلِّل محدد، ويحظر TrackerControl DNS المشفّر ليتمكن من اكتشاف أدوات التتبع. اضغط لضبط DNS الخاص على \"تلقائي\" أو \"إيقاف\" — يوفّر TrackerControl DNS الآمن الخاص به في الإعدادات.</string>
+    <string name="msg_private_dns_bypass_title">DNS الخاص يتجاوز اكتشاف أدوات التتبع</string>
+    <string name="msg_private_dns_bypass_notify">اكتشاف أدوات التتبع متوقف: DNS مشفّر إلى %1$s، لذا لا يمكن تحليل اتصالات التطبيقات</string>
+    <string name="msg_private_dns_bypass_allowed_notify">تستخدم بعض التطبيقات DNS مشفّرًا؛ اتصالاتها بأدوات التتبع غير مرئية لـ TrackerControl.</string>
+    <string name="setting_monitor_system">مراقبة تطبيقات النظام</string>
+    <string name="summary_monitor_system">توجيه تطبيقات النظام (خدمات Play وخدمات مشغّل الشبكة وغيرها) عبر VPN ليتم اكتشاف أدوات التتبع فيها وحظرها، وإظهارها في قائمة التطبيقات.\n\nمعطّل افتراضيًا: استثناء تطبيقات النظام أفضل للبطارية، لأن حركتها في الخلفية لا توقظ VPN. يتعارض تشغيل هذا الخيار مع \"حظر الاتصالات بدون VPN\" في إعدادات VPN في Android، والذي يجب أن يكون معطّلًا.</string>
+    <!-- Onboarding -->
+    <string name="title_next">التالي</string>
+    <string name="title_previous">السابق</string>
+    <string name="title_finish">ابدأ الآن</string>
+    <string name="onboarding_welcome_title">تحكّم في خصوصيتك</string>
+    <string name="onboarding_welcome_desc">TrackerControl مشروع بحثي يقوده المجتمع يمكّنك من:\n\n• <b>مراقبة</b> جمع البيانات الخفي من تطبيقات الجوال في الوقت الفعلي.\n• <b>حظر</b> أدوات التتبع والإعلانات باستخدام قاعدة بياناتنا لـ <b>2,000,000 تطبيق تم تحليله</b>.\n• <b>تحديد</b> الشركات والبلدان المستقبِلة لبياناتك.\n\nيتم كل التحليل <b>محليًا على جهازك</b> – حركتك لا تخرج أبدًا عن سيطرتك.</string>
+    <string name="onboarding_vpn_title">تمكين حماية</string>
+    <string name="onboarding_vpn_desc">يستخدم TrackerControl واجهة VPN المحلية في Android لتحليل حركة الإنترنت لديك.\n\n<b>مهم:</b> لا يشارك أي خادم VPN خارجي. نحن لا نرى بياناتك.</string>
+    <string name="onboarding_vpn_action">تفعيل VPN على الجهاز</string>
+    <string name="onboarding_vpn_sure">لا يستطيع TrackerControl تصفية أي حركة بدون VPN المحلية. هل أنت متأكد من المتابعة دون تفعيلها؟</string>
+    <string name="onboarding_vpn_blocked_title">VPN أخرى نشطة</string>
+    <string name="onboarding_vpn_blocked_desc">منع Android تطبيق TrackerControl من تشغيل VPN المحلية لأن تطبيقًا آخر مضبوط كـ <b>Always-on VPN</b>. افتح إعدادات VPN وعطّل Always-on للـ VPN الأخرى، ثم حاول مجددًا.</string>
+    <string name="onboarding_vpn_blocked_action">فتح VPN إعدادات</string>
+    <string name="onboarding_notify_title">ابقَ على اطلاع</string>
+    <string name="onboarding_notify_desc">اسمح بالإشعارات لرؤية التحديثات الفورية والتحكم في الحماية مباشرة من شريط الحالة.</string>
+    <string name="onboarding_notify_action">السماح بالإشعارات</string>
+    <string name="onboarding_notify_sure">بدون إذن الإشعارات، لن تتمكن من رؤية التحديثات الفورية أو التحكم في الحماية من شريط الحالة. هل أنت متأكد؟</string>
+    <string name="onboarding_timeline_title">شاهد الخط الزمني يمتلئ</string>
+    <string name="onboarding_timeline_desc">يبدأ TrackerControl من الخط الزمني. قد يكون فارغًا في البداية: تتصل التطبيقات عادةً بأدوات التتبع أثناء استخدامك لها فقط.\n\nبعد إنهاء الإعداد، افتح بعض التطبيقات ثم عد إلى TrackerControl لرؤية نشاط التتبع المكتشَف والمحظور.</string>
+    <string name="onboarding_lockdown_title">إعداد قفل VPN</string>
+    <string name="onboarding_lockdown_desc">في Android إعداد اسمه \"حظر الاتصالات بدون VPN\" يمنع التطبيقات من الاتصال قبل أن يصبح TrackerControl جاهزًا.\n\nإذا كان مفعّلًا، فقد يتسبب في فشل تحميل التطبيقات. نوصي بإبقاء هذا الإعداد <b>معطّلًا</b> للحصول على أفضل تجربة.</string>
+    <string name="onboarding_lockdown_action">فتح VPN إعدادات</string>
+    <string name="onboarding_lockdown_sure">قد تؤدي المتابعة مع تفعيل القفل إلى مشكلات في الاتصال. هل أنت متأكد؟</string>
+    <string name="onboarding_action_disabled">معطل</string>
+    <string name="onboarding_action_granted">ممنوح</string>
+    <!-- Insights Screen -->
+    <string name="insights_title">رؤى خصوصيتك</string>
+    <string name="insights_subtitle_7days">آخر 7 أيام</string>
+    <string name="insights_tracking_attempts">مضيفو أدوات التتبع المتصَل بهم</string>
+    <string name="insights_blocked">محظور</string>
+    <string name="insights_allowed">مسموح عبر</string>
+    <string name="insights_tracker_companies">شركات التتبع</string>
+    <string name="insights_apps_with_trackers">تطبيقات فيها أدوات تتبع</string>
+    <string name="insights_pervasive_trackers">أكثر أدوات التتبع انتشارًا</string>
+    <string name="insights_top_domains">أبرز نطاقات أدوات التتبع</string>
+    <!-- Joins the alternative domain names of one tracker, e.g. "example.com or example.net". Keep the surrounding spaces. -->
+    <string name="insights_domain_alias_separator">" أو "</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_in_apps" tools:ignore="PluralsCandidate">في %d تطبيقات</string>
+    <plurals name="insights_apps_count">
+        <item quantity="zero">في %d تطبيق</item>
+        <item quantity="one">في تطبيق واحد (%d)</item>
+        <item quantity="two">في تطبيقين (%d)</item>
+        <item quantity="few">في %d تطبيقات</item>
+        <item quantity="many">في %d تطبيقًا</item>
+        <item quantity="other">في %d تطبيق</item>
+    </plurals>
+    <string name="insights_no_data">لا توجد بيانات تتبع بعد. استخدم تطبيقاتك وعد لاحقًا!</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_shocking_fact" tools:ignore="PluralsCandidate">اتصلت تطبيقاتك بـ %1$d شركة تتبع عبر %2$d مضيف تتبع هذا الأسبوع!</string>
+    <!-- Retained for Play Store copy; call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_share">شارك مع الأصدقاء</string>
+    <string name="insights_share_trackers_blocked">مضيفو أدوات التتبع المحظورون</string>
+    <string name="insights_share_url">TrackerControl.عنصر</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_share_message" tools:ignore="PluralsCandidate">حظرت %1$d من مضيفي أدوات التتبع لدى %2$d شركة هذا الأسبوع باستخدام TrackerControl! استعد خصوصيتك: https://trackercontrol.org</string>
+    <!-- Retained for Play Store copy; call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_see_more">عرض المزيد →</string>
+    <!-- What's New onboarding slide (not translated) -->
+    <string name="title_blocklists">قوائم حظر مخصصة</string>
+    <string name="summary_manage_blocklists">أضف قوائم حظر بتنسيق ملف hosts. تُستخدم عندما لا تحدد قوائم أدوات التتبع المضمّنة نطاقًا ما.</string>
+    <string name="title_add_blocklist">إضافة قائمة حظر</string>
+    <string name="title_delete_blocklist">حذف قائمة الحظر</string>
+    <string name="msg_delete_blocklist_confirm">هل أنت متأكد أنك تريد حذف قائمة الحظر هذه؟</string>
+    <string name="msg_invalid_url">عنوان URL غير صالح</string>
+    <string name="msg_apply_blocklists_failed">تعذّر تطبيق قوائم الحظر</string>
+    <string name="msg_last_update">آخر تحديث: %s</string>
+    <string name="blocklist_format">أدخل عنوان HTTPS URL لقائمة حظر بتنسيق hosts (مثل 0.0.0.0 ads.example.com). قواعد تصفية المتصفح غير مدعومة.</string>
+    <string name="blocklist_minimal_notice">قوائم الحظر المخصصة غير نشطة في الوضع الأدنى. انتقل إلى الوضع القياسي أو الصارم من الإعدادات لاستخدامها.</string>
+    <string name="blocklist_research_notice">قوائم الحظر المخصصة غير نشطة أثناء تشغيل وضع البحث. أوقف البحث من الإعدادات لتفعيل حظر أدوات التتبع.</string>
+    <string name="blocklist_browser_notice">حماية المتصفح من أدوات التتبع معطّلة افتراضيًا. فعّلها من صفحة تطبيق المتصفح لاستخدام قوائم الحظر المخصصة هناك.</string>
+    <string name="blocklist_downloading">جارٍ تنزيل قوائم الحظر… في انتظار الاتصال إذا كنت غير متصل.</string>
+    <string name="blocklist_not_downloaded">لم يتم التنزيل بعد</string>
+    <string name="blocklist_download_failed">تعذّر تنزيل قوائم الحظر أو تطبيقها. تحقق من أخطاء القوائم وحاول التحديث مرة أخرى.</string>
+    <string name="blocklist_update">تحديث قوائم الحظر</string>
+    <!-- Accessibility labels -->
+    <string name="switch_tracker_control_description">حظر أدوات التتبع</string>
+    <string name="blocklist_delete_description">حذف قائمة الحظر</string>
+    <string name="blocklist_enable_description">تفعيل قائمة الحظر %s</string>
+    <string name="log_connection_allowed">مسموح</string>
+    <string name="log_connection_blocked">محظور</string>
+    <string name="log_connection_other">شبكة أخرى</string>
+    <string name="log_screen_on">الشاشة قيد التشغيل</string>
+</resources>

@@ -1,0 +1,711 @@
+/*
+ * TrackerControl is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Copyright © 2024–2026 Konrad Kollnig
+ */
+
+package net.kollnig.missioncontrol.dns;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.util.Log;
+
+import androidx.annotation.Nullable;
+import androidx.preference.PreferenceManager;
+
+import net.kollnig.missioncontrol.BuildConfig;
+
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.EOFException;
+import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
+/**
+ * Local DNS proxy server that forwards DNS queries via DNS-over-HTTPS.
+ * Listens on 127.0.0.1:5353 and forwards all queries to the configured DoH
+ * endpoint.
+ */
+public class DnsProxyServer {
+    public static final int DNS_PROXY_PORT = 5353;
+    public static final String DNS_PROXY_ADDRESS = "127.0.0.1";
+    private static final String TAG = "TrackerControl.DnsProxy";
+
+    // TCP proxy is still in testing - set to true to enable
+    private static final boolean TCP_ENABLED = true;
+
+    private static DnsProxyServer instance;
+
+    private final Context context;
+    private final AtomicBoolean running = new AtomicBoolean(false);
+    private DatagramSocket serverSocket;
+    private ServerSocket tcpServerSocket;
+    private ThreadPoolExecutor executor;
+    // Tracked so stop() can wait for the listeners to actually exit, rather
+    // than just closing their sockets and returning immediately.
+    private Thread udpListenerThread;
+    private Thread tcpListenerThread;
+    private static final long LISTENER_JOIN_TIMEOUT_MS = 2000;
+    private static final int REQUEST_WORKERS = 16;
+    private static final int REQUEST_QUEUE_CAPACITY = 64;
+    private final AtomicInteger overloadDrops = new AtomicInteger(0);
+    // Trips after this many consecutive failed network attempts (not queries):
+    // a single failing resolve burns up to three full timeout budgets, so a
+    // broken endpoint must stop being hammered within a few bad queries.
+    private static final int CIRCUIT_BREAKER_THRESHOLD = 10;
+    private static final long CIRCUIT_BREAKER_COOLDOWN_MS = 60_000;
+    private static final int FALLBACK_DNS_TIMEOUT_MS = 5000;
+    private final Object circuitBreakerLock = new Object();
+    private CircuitState circuitState;
+
+    static final class CircuitState {
+        final String endpoint;
+        final AtomicInteger failures = new AtomicInteger(0);
+        volatile long openUntil = 0;
+
+        CircuitState(String endpoint) {
+            this.endpoint = endpoint;
+        }
+
+        boolean isOpen(long now) {
+            return now < openUntil;
+        }
+
+        void recordSuccess() {
+            failures.set(0);
+            openUntil = 0;
+        }
+
+        int recordFailure(int failedAttempts) {
+            return failures.addAndGet(Math.max(1, failedAttempts));
+        }
+
+        void trip(long now) {
+            openUntil = now + CIRCUIT_BREAKER_COOLDOWN_MS;
+            failures.set(0);
+        }
+    }
+
+    private DnsProxyServer(Context context) {
+        this.context = context.getApplicationContext();
+    }
+
+    public static synchronized DnsProxyServer getInstance(Context context) {
+        if (instance == null) {
+            instance = new DnsProxyServer(context);
+        }
+        return instance;
+    }
+
+    /**
+     * Start the DNS proxy server if DoH is enabled.
+     */
+    public synchronized void start() {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        boolean dohEnabled = prefs.getBoolean("doh_enabled", false);
+
+        if (!dohEnabled) {
+            Log.i(TAG, "DoH not enabled, not starting DNS proxy");
+            return;
+        }
+
+        if (running.get()) {
+            Log.d(TAG, "DNS proxy already running");
+            return;
+        }
+
+        // A stopped proxy gets a fresh circuit so disable/enable recovers from
+        // an earlier endpoint outage. Delayed workers still retain the state
+        // captured by their own request and cannot touch this replacement.
+        resetCircuitState();
+
+        // Close any existing sockets first (safety for app restart scenarios)
+        if (serverSocket != null && !serverSocket.isClosed()) {
+            Log.w(TAG, "Closing stale UDP socket before starting");
+            serverSocket.close();
+        }
+        if (tcpServerSocket != null && !tcpServerSocket.isClosed()) {
+            Log.w(TAG, "Closing stale TCP socket before starting");
+            try {
+                tcpServerSocket.close();
+            } catch (IOException e) {
+                Log.e(TAG, "Error closing stale TCP socket: " + e.getMessage());
+            }
+        }
+
+        try {
+            serverSocket = new DatagramSocket(null); // Create unbound first
+            serverSocket.setReuseAddress(true);
+            serverSocket.bind(new InetSocketAddress(DNS_PROXY_ADDRESS, DNS_PROXY_PORT));
+            running.set(true);
+
+            // Handlers block on network I/O (worst case ~15s per DoH resolve),
+            // so a pool of 4 collapsed resolution throughput under packet loss.
+            // Bound the waiting work as well: a dead endpoint must not retain
+            // an unlimited number of DNS packets and accepted TCP sockets.
+            executor = createRequestExecutor(REQUEST_WORKERS, REQUEST_QUEUE_CAPACITY);
+            overloadDrops.set(0);
+
+            // Start the main listener thread
+            udpListenerThread = new Thread(this::runServer, "DnsProxyServer");
+            udpListenerThread.start();
+
+            // Sync the screen-state policy so a start mid-doze (e.g. a network
+            // reload at night) doesn't inherit the screen-on behaviour.
+            DnsOverHttpsClient.setScreenOff(!eu.faircode.netguard.Util.isInteractive(context));
+
+            Log.i(TAG, "DNS proxy server started on " + DNS_PROXY_ADDRESS + ":" + DNS_PROXY_PORT);
+
+            // Start TCP server only if enabled (still in testing)
+            if (TCP_ENABLED) {
+                try {
+                    tcpServerSocket = new ServerSocket();
+                    tcpServerSocket.setReuseAddress(true);
+                    tcpServerSocket.bind(new InetSocketAddress(DNS_PROXY_ADDRESS, DNS_PROXY_PORT));
+                    tcpListenerThread = new Thread(this::runTcpServer, "DnsProxyServer-TCP");
+                    tcpListenerThread.start();
+                    Log.i(TAG, "DNS TCP proxy server started on " + DNS_PROXY_ADDRESS + ":" + DNS_PROXY_PORT);
+                } catch (IOException e) {
+                    Log.e(TAG, "Failed to bind DNS TCP proxy: " + e.getMessage());
+                }
+            }
+
+        } catch (SocketException e) {
+            Log.e(TAG, "Failed to start DNS proxy: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Stop the DNS proxy server.
+     */
+    public synchronized void stop() {
+        if (!running.get()) {
+            return;
+        }
+
+        running.set(false);
+
+        if (serverSocket != null && !serverSocket.isClosed()) {
+            serverSocket.close();
+        }
+
+        if (tcpServerSocket != null && !tcpServerSocket.isClosed()) {
+            try {
+                tcpServerSocket.close();
+            } catch (IOException e) {
+                Log.e(TAG, "Error closing TCP server socket: " + e.getMessage());
+            }
+        }
+
+        // Closing the sockets above unblocks each listener's receive()/accept()
+        // call, but does not guarantee it has actually returned yet. Wait for
+        // both before proceeding, otherwise an immediate start() can leave an
+        // old listener still observing the just-restored running == true
+        // alongside the new socket/executor fields.
+        joinListenerThread(udpListenerThread, "UDP");
+        udpListenerThread = null;
+        joinListenerThread(tcpListenerThread, "TCP");
+        tcpListenerThread = null;
+
+        if (executor != null) {
+            List<Runnable> pending = executor.shutdownNow();
+            for (Runnable task : pending)
+                if (task instanceof TcpConnectionTask)
+                    ((TcpConnectionTask) task).discard();
+            executor = null;
+        }
+
+        // Also reset the DoH client to close idle HTTPS connections
+        DnsOverHttpsClient.resetInstance();
+
+        Log.i(TAG, "DNS proxy server stopped");
+    }
+
+    private void resetCircuitState() {
+        synchronized (circuitBreakerLock) {
+            circuitState = null;
+        }
+    }
+
+    /**
+     * Select the circuit state for one request. The preference read must stay
+     * inside this lock: otherwise a delayed worker can install an old endpoint
+     * snapshot after a newer endpoint has already been selected.
+     * Package-private for deterministic state tests.
+     */
+    CircuitState getCurrentCircuitState() {
+        synchronized (circuitBreakerLock) {
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+            String endpoint = prefs.getString("doh_endpoint", BuildConfig.DEFAULT_DOH_ENDPOINT);
+            if (circuitState == null || !Objects.equals(circuitState.endpoint, endpoint))
+                circuitState = new CircuitState(endpoint);
+            return circuitState;
+        }
+    }
+
+    private void reportDohCircuitOpen(CircuitState state, String message) {
+        synchronized (circuitBreakerLock) {
+            if (getCurrentCircuitState() != state
+                    || !eu.faircode.netguard.Util.isInternetWorking(context))
+                return;
+            Log.w(TAG, message);
+            eu.faircode.netguard.ServiceSinkhole.dohError(context);
+        }
+    }
+
+    /**
+     * Wait (bounded) for a listener thread to exit after its socket was
+     * closed. Logs rather than throwing if it does not stop in time, since
+     * stop() must still complete and release the lock.
+     */
+    private void joinListenerThread(@Nullable Thread thread, String label) {
+        if (thread == null)
+            return;
+
+        try {
+            thread.join(LISTENER_JOIN_TIMEOUT_MS);
+            if (thread.isAlive())
+                Log.w(TAG, label + " listener thread did not stop within "
+                        + LISTENER_JOIN_TIMEOUT_MS + "ms");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            Log.w(TAG, "Interrupted while waiting for " + label + " listener thread to stop");
+        }
+    }
+
+    /**
+     * Apply the screen-state DoH battery policy. While the screen is off the
+     * DoH client drops retries and evicts idle keep-alive HTTPS connections so
+     * a server-side reset mid-doze can't wake the radio. In-flight requests
+     * keep their connections; the response cache is intentionally preserved —
+     * it is most valuable precisely while the screen is off. No-op when the
+     * proxy is not running.
+     */
+    public void onScreenStateChanged(boolean interactive) {
+        if (!running.get())
+            return;
+        DnsOverHttpsClient.setScreenOff(!interactive);
+    }
+
+    /**
+     * Check DoH enabled state and start/stop the proxy accordingly.
+     * Call this from ServiceSinkhole.reload() to handle settings changes.
+     */
+    public synchronized void checkAndUpdateState() {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        boolean dohEnabled = prefs.getBoolean("doh_enabled", false);
+
+        if (dohEnabled && !running.get()) {
+            Log.i(TAG, "DoH enabled but proxy not running, starting");
+            start();
+        } else if (!dohEnabled && running.get()) {
+            Log.i(TAG, "DoH disabled but proxy running, stopping");
+            stop();
+        }
+    }
+
+    /**
+     * Check if the proxy server is running.
+     */
+    public boolean isRunning() {
+        return running.get();
+    }
+
+    /**
+     * Main server loop - receives DNS queries and dispatches them to the thread
+     * pool.
+     */
+    private void runServer() {
+        byte[] buffer = new byte[65535]; // Max UDP payload, so a larger EDNS0 query is not silently truncated
+
+        while (running.get()) {
+            try {
+                DatagramPacket request = new DatagramPacket(buffer, buffer.length);
+                serverSocket.receive(request);
+
+                // Copy the data for the handler thread
+                byte[] queryData = new byte[request.getLength()];
+                System.arraycopy(request.getData(), 0, queryData, 0, request.getLength());
+
+                final InetAddress clientAddress = request.getAddress();
+                final int clientPort = request.getPort();
+
+                // Handle the query in a separate thread. Overload gets an
+                // immediate SERVFAIL instead of retaining stale work while
+                // every worker waits on the same failed DoH endpoint.
+                if (!tryExecute(executor,
+                        () -> handleQuery(queryData, clientAddress, clientPort)))
+                    rejectUdpQuery(queryData, clientAddress, clientPort);
+
+            } catch (IOException e) {
+                if (running.get()) {
+                    Log.e(TAG, "Error receiving DNS query: " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    static ThreadPoolExecutor createRequestExecutor(int workers, int queueCapacity) {
+        if (workers <= 0 || queueCapacity <= 0)
+            throw new IllegalArgumentException("workers and queueCapacity must be positive");
+        return new ThreadPoolExecutor(
+                workers, workers, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(queueCapacity));
+    }
+
+    static boolean tryExecute(@Nullable ThreadPoolExecutor target, Runnable task) {
+        if (target == null)
+            return false;
+        try {
+            target.execute(task);
+            return true;
+        } catch (RejectedExecutionException ignored) {
+            return false;
+        }
+    }
+
+    private void logOverload(String transport) {
+        int dropped = overloadDrops.incrementAndGet();
+        if ((dropped & 255) == 1)
+            Log.w(TAG, "DNS " + transport + " overload, rejected " + dropped + " request(s)");
+    }
+
+    private void rejectUdpQuery(byte[] queryData, InetAddress clientAddress, int clientPort) {
+        logOverload("UDP");
+        try {
+            sendServFailResponse(queryData, clientAddress, clientPort);
+        } catch (IOException e) {
+            Log.d(TAG, "Unable to send overload SERVFAIL: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Handle a single DNS query by forwarding it via DoH.
+     */
+    private void handleQuery(byte[] queryData, InetAddress clientAddress, int clientPort) {
+        try {
+            // Malformed datagrams are dropped silently rather than answered:
+            // a query shorter than a 12-byte DNS header has no transaction ID
+            // to safely echo back, so there is nothing to build a SERVFAIL
+            // response from. This matches the TCP path below. Dropping here
+            // also means garbage doesn't count as a DoH failure and can't
+            // trip the circuit breaker.
+            if (!isPlausibleDnsQuery(queryData)) {
+                return;
+            }
+
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+            byte[] responseData = null;
+
+            // Circuit breaker: skip DoH if we recently had too many failures
+            CircuitState state = getCurrentCircuitState();
+            boolean circuitOpen = state.isOpen(System.currentTimeMillis());
+            AtomicInteger queryFailedAttempts = new AtomicInteger(0);
+            if (!circuitOpen) {
+                DnsOverHttpsClient dohClient = DnsOverHttpsClient.getInstance(context, state.endpoint);
+                responseData = dohClient.resolve(queryData, queryFailedAttempts::incrementAndGet);
+            }
+
+            if (responseData != null) {
+                state.recordSuccess();
+                DatagramSocket socket = serverSocket;
+                if (socket == null || socket.isClosed()) return;
+                DatagramPacket response = new DatagramPacket(
+                        responseData, responseData.length, clientAddress, clientPort);
+                socket.send(response);
+                Log.d(TAG, "DoH query successful, response sent to " + clientAddress + ":" + clientPort);
+            } else {
+                if (!circuitOpen) {
+                    // Each wasted attempt counts: one broken query can burn
+                    // three full timeout budgets, and waiting for ten whole
+                    // queries before tripping kept ~30s of hung work alive
+                    // per query on a dead network.
+                    int failures = state.recordFailure(queryFailedAttempts.get());
+                    Log.w(TAG, "DoH query returned null response after "
+                            + queryFailedAttempts.get() + " attempt(s), failures=" + failures);
+
+                    if (failures >= CIRCUIT_BREAKER_THRESHOLD) {
+                        state.trip(System.currentTimeMillis());
+                        reportDohCircuitOpen(state,
+                                "DoH circuit breaker tripped, skipping DoH for 60s");
+                    }
+                }
+
+                // Fallback to standard DNS if enabled
+                boolean dnsFallback = prefs.getBoolean("doh_dns_fallback", false);
+                if (dnsFallback) {
+                    byte[] fallbackResponse = resolveViaStandardDns(queryData);
+                    DatagramSocket socket = serverSocket;
+                    if (socket == null || socket.isClosed()) return;
+                    if (fallbackResponse != null) {
+                        Log.w(TAG, "DoH failed, used standard DNS fallback");
+                        DatagramPacket response = new DatagramPacket(
+                                fallbackResponse, fallbackResponse.length, clientAddress, clientPort);
+                        socket.send(response);
+                    } else {
+                        sendServFailResponse(queryData, clientAddress, clientPort);
+                    }
+                } else {
+                    sendServFailResponse(queryData, clientAddress, clientPort);
+                }
+            }
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error handling DNS query: " + e.getMessage());
+            // Try to send a SERVFAIL response
+            try {
+                sendServFailResponse(queryData, clientAddress, clientPort);
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    /**
+     * A plausible DNS message carries at least the fixed 12-byte header.
+     * Package-private for unit testing.
+     */
+    static boolean isPlausibleDnsQuery(byte[] q) {
+        return q != null && q.length >= 12;
+    }
+
+    /**
+     * Build a SERVFAIL response by echoing the query's header with the QR
+     * bit set and RCODE=SERVFAIL. Returns null (rather than throwing) if
+     * queryData is null or too short to carry a 12-byte DNS header, so
+     * callers can treat "can't build a response" as a normal, silent case.
+     * Package-private for unit testing.
+     */
+    static byte[] buildServFailResponse(byte[] queryData) {
+        if (queryData == null || queryData.length < 12)
+            return null;
+
+        // Copy the query and modify it to be a SERVFAIL response
+        byte[] response = new byte[queryData.length];
+        System.arraycopy(queryData, 0, response, 0, queryData.length);
+
+        // Set QR bit (response) and RCODE to SERVFAIL (2)
+        response[2] = (byte) ((queryData[2] | 0x80) & 0xFB); // QR=1, keep other flags
+        response[3] = (byte) ((queryData[3] & 0xF0) | 0x02); // RCODE = SERVFAIL
+        return response;
+    }
+
+    /**
+     * Send a SERVFAIL response to the client.
+     */
+    private void sendServFailResponse(byte[] queryData, InetAddress clientAddress, int clientPort)
+            throws IOException {
+        byte[] response = buildServFailResponse(queryData);
+        if (response == null)
+            return;
+
+        DatagramSocket socket = serverSocket;
+        if (socket == null || socket.isClosed())
+            return;
+
+        DatagramPacket packet = new DatagramPacket(response, response.length, clientAddress, clientPort);
+        socket.send(packet);
+    }
+
+    private void runTcpServer() {
+        while (running.get()) {
+            try {
+                Socket clientSocket = tcpServerSocket.accept();
+                clientSocket.setSoTimeout(10000); // 10s timeout
+                TcpConnectionTask task = new TcpConnectionTask(clientSocket);
+                if (!tryExecute(executor, task)) {
+                    logOverload("TCP");
+                    task.discard();
+                }
+            } catch (IOException e) {
+                if (running.get()) {
+                    Log.e(TAG, "Error accepting TCP connection: " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    private final class TcpConnectionTask implements Runnable {
+        private final Socket client;
+
+        private TcpConnectionTask(Socket client) {
+            this.client = client;
+        }
+
+        @Override
+        public void run() {
+            handleTcpConnection(client);
+        }
+
+        private void discard() {
+            try {
+                client.close();
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    private void handleTcpConnection(Socket client) {
+        try (Socket socket = client;
+                DataInputStream in = new DataInputStream(socket.getInputStream());
+                DataOutputStream out = new DataOutputStream(socket.getOutputStream())) {
+
+            // DataInputStream#readUnsignedShort() never returns -1: per its
+            // contract it throws EOFException if the stream ends before two
+            // bytes are read, which is exactly what a bare TCP connect probe
+            // (no length prefix at all) looks like. Handled below, quietly.
+            int length = in.readUnsignedShort();
+            byte[] queryData = new byte[length];
+            in.readFully(queryData);
+
+            // Malformed queries get no answer rather than a DoH attempt that
+            // would count toward the circuit breaker
+            if (!isPlausibleDnsQuery(queryData))
+                return;
+
+            // Resolve using the existing logic (reuse handleQuery logic or extract common
+            // part)
+            // Note: handleQuery writes to UDP socket directly, so we can't fully reuse it
+            // without refactoring.
+            // We'll duplicate the resolution logic slightly for simplicity or extract it.
+            // Let's copy the resolution logic here for safety.
+
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+            byte[] responseData = null;
+
+            CircuitState state = getCurrentCircuitState();
+            boolean circuitOpen = state.isOpen(System.currentTimeMillis());
+            AtomicInteger queryFailedAttempts = new AtomicInteger(0);
+            if (!circuitOpen) {
+                DnsOverHttpsClient dohClient = DnsOverHttpsClient.getInstance(context, state.endpoint);
+                responseData = dohClient.resolve(queryData, queryFailedAttempts::incrementAndGet);
+            }
+
+            if (responseData != null) {
+                state.recordSuccess();
+                out.writeShort(responseData.length);
+                out.write(responseData);
+                out.flush();
+                Log.d(TAG, "DoH TCP query successful");
+            } else {
+                if (!circuitOpen) {
+                    // Same attempt-based accounting as the UDP path above.
+                    int failures = state.recordFailure(queryFailedAttempts.get());
+                    if (failures >= CIRCUIT_BREAKER_THRESHOLD) {
+                        state.trip(System.currentTimeMillis());
+                        reportDohCircuitOpen(state,
+                                "DoH circuit breaker tripped (TCP), skipping DoH for 60s");
+                    }
+                }
+
+                boolean dnsFallback = prefs.getBoolean("doh_dns_fallback", false);
+                if (dnsFallback) {
+                    byte[] fallbackResponse = resolveViaStandardDns(queryData);
+                    if (fallbackResponse != null) {
+                        Log.w(TAG, "DoH failed, used standard DNS fallback (TCP)");
+                        out.writeShort(fallbackResponse.length);
+                        out.write(fallbackResponse);
+                        out.flush();
+                    } else {
+                        sendTcpServFail(out, queryData);
+                    }
+                } else {
+                    sendTcpServFail(out, queryData);
+                }
+            }
+
+        } catch (EOFException e) {
+            // Peer closed before completing the length-prefixed frame (e.g. a
+            // bare connect probe with no payload) -- not an error, and not
+            // worth logging.
+        } catch (Exception e) {
+            Log.e(TAG, "Error handling TCP DNS query: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Fallback: forward the raw DNS query to the system's DNS server via plain UDP.
+     */
+    @Nullable
+    private byte[] resolveViaStandardDns(byte[] queryData) {
+        List<InetAddress> dnsServers = eu.faircode.netguard.ServiceSinkhole.getDns(context);
+        if (dnsServers.isEmpty()) {
+            Log.w(TAG, "No fallback DNS servers available");
+            return null;
+        }
+
+        for (InetAddress dnsServer : dnsServers) {
+            try (DatagramSocket socket = new DatagramSocket()) {
+                // Connect the socket so the kernel drops any packet not from
+                // dnsServer:53 before it ever reaches us -- otherwise the
+                // socket is unconnected and any host reaching this ephemeral
+                // port qualifies.
+                socket.connect(dnsServer, 53);
+
+                DatagramPacket request = new DatagramPacket(
+                        queryData, queryData.length, dnsServer, 53);
+                socket.send(request);
+
+                // Kernel-level connect() filters by sender address/port;
+                // additionally accept only responses echoing this query's
+                // transaction ID, so an off-path spoof from the real server's
+                // address (e.g. a compromised resolver, or another client
+                // behind the same NAT) still can't be mistaken for our reply.
+                byte[] buffer = new byte[4096];
+                long deadline = System.nanoTime()
+                        + TimeUnit.MILLISECONDS.toNanos(FALLBACK_DNS_TIMEOUT_MS);
+                while (true) {
+                    long remaining = deadline - System.nanoTime();
+                    if (remaining <= 0)
+                        throw new SocketTimeoutException("no matching response in time");
+
+                    // toMillis truncation must not yield 0: setSoTimeout(0) means infinite
+                    long timeoutMs = Math.max(1, TimeUnit.NANOSECONDS.toMillis(remaining));
+                    socket.setSoTimeout((int) timeoutMs);
+                    DatagramPacket response = new DatagramPacket(buffer, buffer.length);
+                    socket.receive(response);
+
+                    if (response.getLength() < 12
+                            || response.getData()[0] != queryData[0]
+                            || response.getData()[1] != queryData[1])
+                        continue;
+
+                    byte[] responseData = new byte[response.getLength()];
+                    System.arraycopy(response.getData(), 0, responseData, 0, response.getLength());
+                    return responseData;
+                }
+            } catch (IOException e) {
+                Log.w(TAG, "Fallback DNS query to " + dnsServer + " failed: " + e.getMessage());
+            }
+        }
+
+        Log.e(TAG, "All fallback DNS servers failed");
+        return null;
+    }
+
+    private void sendTcpServFail(DataOutputStream out, byte[] queryData) throws IOException {
+        byte[] response = buildServFailResponse(queryData);
+        if (response == null)
+            return;
+        out.writeShort(response.length);
+        out.write(response);
+        out.flush();
+    }
+}
