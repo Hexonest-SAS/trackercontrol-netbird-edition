@@ -1,0 +1,706 @@
+/*
+ * This file is from NetGuard.
+ *
+ * NetGuard is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * NetGuard is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with NetGuard.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * Copyright © 2015–2020 Marcel Bokhorst (M66B)
+ * Copyright © 2019–2026 Konrad Kollnig
+ */
+
+package eu.faircode.netguard;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.content.res.XmlResourceParser;
+import android.database.Cursor;
+import android.os.Build;
+import android.os.Process;
+import android.util.Log;
+
+import androidx.preference.PreferenceManager;
+
+import com.google.android.material.snackbar.Snackbar;
+
+import net.kollnig.missioncontrol.Common;
+import net.kollnig.missioncontrol.R;
+import net.kollnig.missioncontrol.data.Pair;
+import net.kollnig.missioncontrol.data.BlockingMode;
+import net.kollnig.missioncontrol.data.InternetBlocklist;
+import net.kollnig.missioncontrol.data.RemoteRoutingLogic;
+import net.kollnig.missioncontrol.data.TrackerBlocklist;
+import net.kollnig.missioncontrol.data.TrackerList;
+
+import org.xmlpull.v1.XmlPullParser;
+
+import java.text.Collator;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+
+public class Rule {
+    private static final String TAG = "TrackerControl.Rule";
+    /** Per-package remote-routing overrides, mirroring "apply"/"tracker_protect". */
+    public static final String PREF_WG_ROUTE = "wg_route";
+    /** Global remote-routing mode, in the default shared preferences. */
+    public static final String PREF_WG_ROUTE_MODE = "wg_route_mode";
+
+    public int uid;
+    public String packageName;
+    public int icon;
+    public String name;
+    public String version;
+    public boolean system;
+    public boolean internet;
+    public boolean enabled;
+    public boolean pkg = true;
+
+    public boolean wifi_default = false;
+    public boolean other_default = false;
+    public boolean screen_wifi_default = false;
+    public boolean screen_other_default = false;
+    public boolean roaming_default = false;
+
+    public boolean wifi_blocked = false;
+    public boolean other_blocked = false;
+    public boolean screen_wifi = false;
+    public boolean screen_other = false;
+    public boolean roaming = false;
+
+    public boolean apply = true; // If false, completely exclude from VPN (no DNS, no routing)
+    public boolean tracker_protect = true; // If false, don't block trackers (but still route through VPN)
+    // Whether this app's traffic is forwarded through the remote VPN. Filtering
+    // and remote routing are independent choices (#723): an app can be fully
+    // monitored and blocked while still connecting from the device's own
+    // network. Resolved from the global mode plus an optional per-app override.
+    public boolean wg_route = true;
+    public boolean notify = true;
+
+    public boolean relateduids = false;
+    public String[] related = null;
+
+    public long hosts;
+    public boolean changed;
+
+    public boolean expanded = false;
+
+    private static List<PackageInfo> cachePackageInfo = null;
+    // ConcurrentHashMap + computeIfAbsent: isSystem() is called from the
+    // packet path (ServiceSinkhole.isAddressAllowed) while clearCache() runs
+    // from package-change broadcasts on another thread. A plain HashMap with
+    // separate containsKey()/get() calls let a concurrent clear() land
+    // between them, auto-unboxing a null Boolean into an NPE inside a JNI
+    // callback; computeIfAbsent() makes the lookup-or-compute atomic instead.
+    private static Map<PackageInfo, String> cacheLabel = new java.util.concurrent.ConcurrentHashMap<>();
+    private static Map<String, Boolean> cacheSystem = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Object predefinedLock = new Object();
+    private static PredefinedRules cachePredefinedRules;
+    private static Map<String, Boolean> cacheInternet = new java.util.concurrent.ConcurrentHashMap<>();
+    private static Map<PackageInfo, Boolean> cacheEnabled = new java.util.concurrent.ConcurrentHashMap<>();
+    private static Map<Integer, Long> trackerRecent = new HashMap<>();
+
+    private static final class PredefinedRules {
+        final Map<String, Boolean> wifiBlocked = new HashMap<>();
+        final Map<String, Boolean> otherBlocked = new HashMap<>();
+        final Map<String, Boolean> roaming = new HashMap<>();
+        final Map<String, String[]> related = new HashMap<>();
+        final Map<String, Boolean> system = new HashMap<>();
+    }
+
+    public long getLastTrackerTime() {
+        Long time = trackerRecent.get(uid);
+        return time == null ? 0L : time;
+    }
+    static List<PackageInfo> getPackages(Context context) {
+        if (cachePackageInfo == null) {
+            PackageManager pm = context.getPackageManager();
+            cachePackageInfo = pm.getInstalledPackages(0);
+        }
+        return new ArrayList<>(cachePackageInfo);
+    }
+
+    private static String getLabel(PackageInfo info, Context context) {
+        return cacheLabel.computeIfAbsent(info, i -> {
+            PackageManager pm = context.getPackageManager();
+            return i.applicationInfo.loadLabel(pm).toString();
+        });
+    }
+
+    public static boolean isSystem(String packageName, Context context) {
+        return cacheSystem.computeIfAbsent(packageName, pkg -> {
+            boolean system = Util.isSystem(pkg, context);
+            Boolean predefined = getPredefinedRules(context).system.get(pkg);
+            return resolveSystemClassification(system, predefined);
+        });
+    }
+
+    static boolean resolveSystemClassification(boolean system, Boolean predefined) {
+        return predefined == null ? system : predefined;
+    }
+
+    private static PredefinedRules getPredefinedRules(Context context) {
+        synchronized (predefinedLock) {
+            if (cachePredefinedRules != null)
+                return cachePredefinedRules;
+
+            PredefinedRules rules = new PredefinedRules();
+
+            try (XmlResourceParser xml = context.getResources().getXml(R.xml.predefined)) {
+                int eventType = xml.getEventType();
+                while (eventType != XmlPullParser.END_DOCUMENT) {
+                    if (eventType == XmlPullParser.START_TAG)
+                        if ("wifi".equals(xml.getName())) {
+                            String pkg = xml.getAttributeValue(null, "package");
+                            rules.wifiBlocked.put(pkg,
+                                    xml.getAttributeBooleanValue(null, "blocked", false));
+                        } else if ("other".equals(xml.getName())) {
+                            String pkg = xml.getAttributeValue(null, "package");
+                            rules.otherBlocked.put(pkg,
+                                    xml.getAttributeBooleanValue(null, "blocked", false));
+                            rules.roaming.put(pkg,
+                                    xml.getAttributeBooleanValue(null, "roaming", true));
+                        } else if ("relation".equals(xml.getName())) {
+                            String pkg = xml.getAttributeValue(null, "package");
+                            rules.related.put(pkg,
+                                    xml.getAttributeValue(null, "related").split(","));
+                        } else if ("type".equals(xml.getName())) {
+                            String pkg = xml.getAttributeValue(null, "package");
+                            rules.system.put(pkg,
+                                    xml.getAttributeBooleanValue(null, "system", true));
+                        }
+                    eventType = xml.next();
+                }
+            } catch (Throwable ex) {
+                Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+            }
+            cachePredefinedRules = rules;
+            return rules;
+        }
+    }
+
+    /**
+     * The packages that one per-UID protection change has to cover: the
+     * shared-UID siblings of {@code packageName}, plus the predefined "related"
+     * packages that resolve to the same UID.
+     *
+     * {@link #getRules} exposes the same relation through {@link #related}, but
+     * only as a by-product of building the whole rule list — a database read, a
+     * host count query and a tracker count for every installed package. A caller
+     * that needs the relation for a single UID resolves it here instead, so a UI
+     * action never pays for a full rule rebuild.
+     */
+    public static List<String> getRelatedPackages(Context context, String packageName, int uid) {
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        if (packageName == null)
+            return new ArrayList<>(result);
+        result.add(packageName);
+
+        PackageManager pm = context.getPackageManager();
+        String[] uidPackages = Util.getPackagesForUid(pm, uid);
+        if (uidPackages != null)
+            result.addAll(Arrays.asList(uidPackages));
+
+        try {
+            Map<String, String[]> related = getPredefinedRules(context).related;
+            ArrayDeque<String> pending = new ArrayDeque<>(result);
+            Set<String> visited = new HashSet<>();
+            while (!pending.isEmpty()) {
+                String current = pending.removeFirst();
+                if (!visited.add(current))
+                    continue;
+                String[] relations = related.get(current);
+                if (relations == null)
+                    continue;
+                // Only a relation that actually shares the UID is covered: the
+                // stores behind a protection change are keyed by package, but
+                // what the tun enforces is the UID.
+                for (String candidate : relations)
+                    if (sharesUid(pm, candidate, uid) && result.add(candidate))
+                        pending.addLast(candidate);
+            }
+        } catch (Throwable ex) {
+            Log.w(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+
+        return new ArrayList<>(result);
+    }
+
+    private static boolean sharesUid(PackageManager pm, String packageName, int uid) {
+        try {
+            return pm.getApplicationInfo(packageName, 0).uid == uid;
+        } catch (Throwable ex) {
+            return false;
+        }
+    }
+
+    private static boolean hasInternet(String packageName, Context context) {
+        return cacheInternet.computeIfAbsent(packageName, pkg -> Util.hasInternet(pkg, context));
+    }
+
+    private static boolean isEnabled(PackageInfo info, Context context) {
+        return cacheEnabled.computeIfAbsent(info, i -> Util.isEnabled(i, context));
+    }
+
+    public static void clearCache(Context context) {
+        Log.i(TAG, "Clearing cache");
+        synchronized (context.getApplicationContext()) {
+            cachePackageInfo = null;
+            cacheLabel.clear();
+            cacheSystem.clear();
+            synchronized (predefinedLock) {
+                cachePredefinedRules = null;
+            }
+            cacheInternet.clear();
+            cacheEnabled.clear();
+        }
+
+        DatabaseHelper dh = DatabaseHelper.getInstance(context);
+        dh.clearApps();
+    }
+
+    private Rule(DatabaseHelper dh, PackageInfo info, Context context) {
+        this.uid = info.applicationInfo.uid;
+        this.packageName = info.packageName;
+        this.icon = info.applicationInfo.icon;
+        this.version = info.versionName;
+        if (info.applicationInfo.uid == 0) {
+            this.name = context.getString(R.string.title_root);
+            this.system = true;
+            this.internet = true;
+            this.enabled = true;
+            this.pkg = false;
+        } else if (info.applicationInfo.uid == 1013) {
+            this.name = context.getString(R.string.title_mediaserver);
+            this.system = true;
+            this.internet = true;
+            this.enabled = true;
+            this.pkg = false;
+        } else if (info.applicationInfo.uid == 1020) {
+            this.name = "MulticastDNSResponder";
+            this.system = true;
+            this.internet = true;
+            this.enabled = true;
+            this.pkg = false;
+        } else if (info.applicationInfo.uid == 1021) {
+            this.name = context.getString(R.string.title_gpsdaemon);
+            this.system = true;
+            this.internet = true;
+            this.enabled = true;
+            this.pkg = false;
+        } else if (info.applicationInfo.uid == 1051) {
+            this.name = context.getString(R.string.title_dnsdaemon);
+            this.system = true;
+            this.internet = true;
+            this.enabled = true;
+            this.pkg = false;
+        } else if (info.applicationInfo.uid == 9999) {
+            this.name = context.getString(R.string.title_nobody);
+            this.system = true;
+            this.internet = true;
+            this.enabled = true;
+            this.pkg = false;
+        } else {
+            Cursor cursor = null;
+            try {
+                cursor = dh.getApp(this.packageName);
+                if (cursor.moveToNext()) {
+                    this.name = cursor.getString(cursor.getColumnIndexOrThrow("label"));
+                    this.system = cursor.getInt(cursor.getColumnIndexOrThrow("system")) > 0;
+                    this.internet = cursor.getInt(cursor.getColumnIndexOrThrow("internet")) > 0;
+                    this.enabled = cursor.getInt(cursor.getColumnIndexOrThrow("enabled")) > 0;
+                } else {
+                    this.name = getLabel(info, context);
+                    this.system = isSystem(info.packageName, context);
+                    this.internet = hasInternet(info.packageName, context);
+                    this.enabled = isEnabled(info, context);
+
+                    dh.addApp(this.packageName, this.name, this.system, this.internet, this.enabled);
+                }
+            } finally {
+                if (cursor != null)
+                    cursor.close();
+            }
+        }
+    }
+
+    // Custom code: tracker counts
+    private static Map<Integer, Integer> trackerCounts;
+    private static Map<Integer, Integer> trackerCountsPastWeek;
+
+    public int getTrackerCount(boolean pastWeekOnly) {
+        Map<Integer, Integer> c = (pastWeekOnly) ? trackerCountsPastWeek : trackerCounts;
+
+        Integer trackerCount = c.get(uid);
+        if (trackerCount == null)
+            trackerCount = 0;
+
+        return trackerCount;
+    }
+
+    public static List<Rule> getRules(final boolean all, Context context) {
+        return getRules(all, false, context);
+    }
+
+    public static List<Rule> getRules(final boolean all, boolean self, Context context) {
+        synchronized (context.getApplicationContext()) {
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+            SharedPreferences apply = context.getSharedPreferences("apply", Context.MODE_PRIVATE);
+            SharedPreferences tracker_protect = context.getSharedPreferences("tracker_protect", Context.MODE_PRIVATE);
+            SharedPreferences wg_route = context.getSharedPreferences(PREF_WG_ROUTE, Context.MODE_PRIVATE);
+            SharedPreferences notify = context.getSharedPreferences("notify", Context.MODE_PRIVATE);
+            String wgRouteMode = RemoteRoutingLogic.normalizeMode(
+                    prefs.getString(PREF_WG_ROUTE_MODE, RemoteRoutingLogic.getDefaultMode()));
+
+            // Get settings
+            boolean manage_system = prefs.getBoolean("manage_system", false);
+            boolean show_user = prefs.getBoolean("show_user", true);
+            boolean show_system = prefs.getBoolean("show_system", false);
+            boolean show_nointernet = prefs.getBoolean("show_nointernet", true);
+            boolean show_unprotected = prefs.getBoolean("show_unprotected", false);
+            boolean show_frozen = prefs.getBoolean("show_frozen", false);
+            boolean strict_blocking = BlockingMode.isStrictMode(context);
+
+            PredefinedRules predefined = getPredefinedRules(context);
+
+            // Build rule list
+            List<Rule> listRules = new ArrayList<>();
+            List<PackageInfo> listPI = getPackages(context);
+
+            int userId = Process.myUid() / 100000;
+
+            // Add root
+            PackageInfo root = new PackageInfo();
+            root.packageName = "root";
+            root.versionCode = Build.VERSION.SDK_INT;
+            root.versionName = Build.VERSION.RELEASE;
+            root.applicationInfo = new ApplicationInfo();
+            root.applicationInfo.uid = 0;
+            root.applicationInfo.icon = 0;
+            listPI.add(root);
+
+            // Add mediaserver
+            PackageInfo media = new PackageInfo();
+            media.packageName = "android.media";
+            media.versionCode = Build.VERSION.SDK_INT;
+            media.versionName = Build.VERSION.RELEASE;
+            media.applicationInfo = new ApplicationInfo();
+            media.applicationInfo.uid = 1013 + userId * 100000;
+            media.applicationInfo.icon = 0;
+            listPI.add(media);
+
+            // MulticastDNSResponder
+            PackageInfo mdr = new PackageInfo();
+            mdr.packageName = "android.multicast";
+            mdr.versionCode = Build.VERSION.SDK_INT;
+            mdr.versionName = Build.VERSION.RELEASE;
+            mdr.applicationInfo = new ApplicationInfo();
+            mdr.applicationInfo.uid = 1020 + userId * 100000;
+            mdr.applicationInfo.icon = 0;
+            listPI.add(mdr);
+
+            // Add GPS daemon
+            PackageInfo gps = new PackageInfo();
+            gps.packageName = "android.gps";
+            gps.versionCode = Build.VERSION.SDK_INT;
+            gps.versionName = Build.VERSION.RELEASE;
+            gps.applicationInfo = new ApplicationInfo();
+            gps.applicationInfo.uid = 1021 + userId * 100000;
+            gps.applicationInfo.icon = 0;
+            listPI.add(gps);
+
+            // Add DNS daemon
+            PackageInfo dns = new PackageInfo();
+            dns.packageName = "android.dns";
+            dns.versionCode = Build.VERSION.SDK_INT;
+            dns.versionName = Build.VERSION.RELEASE;
+            dns.applicationInfo = new ApplicationInfo();
+            dns.applicationInfo.uid = 1051 + userId * 100000;
+            dns.applicationInfo.icon = 0;
+            listPI.add(dns);
+
+            // Add nobody
+            PackageInfo nobody = new PackageInfo();
+            nobody.packageName = "nobody";
+            nobody.versionCode = Build.VERSION.SDK_INT;
+            nobody.versionName = Build.VERSION.RELEASE;
+            nobody.applicationInfo = new ApplicationInfo();
+            nobody.applicationInfo.uid = 9999;
+            nobody.applicationInfo.icon = 0;
+            listPI.add(nobody);
+
+            DatabaseHelper dh = DatabaseHelper.getInstance(context);
+            TrackerBlocklist trackerBlocklist = TrackerBlocklist.getInstance(context);
+
+            // Let an imported entry claim its app before ensureDefaults runs.
+            // A numeric default created first wins the collision, which would
+            // strand the imported subset under its package-name key. This is
+            // also the only path covering an install made while the VPN was
+            // stopped, when packageChangedReceiver is not registered.
+            InternetBlocklist internetBlocklist = InternetBlocklist.getInstance(context);
+            if (internetBlocklist.resolvePendingPackages(context))
+                internetBlocklist.saveSettings(context);
+            boolean trackerDefaultsChanged = trackerBlocklist.resolvePendingPackages(context);
+            for (PackageInfo info : listPI)
+                try {
+                    // Skip self
+                    if (!self && info.applicationInfo.uid == Process.myUid())
+                        continue;
+
+                    Rule rule = new Rule(dh, info, context);
+
+                    trackerDefaultsChanged |= trackerBlocklist.ensureDefaults(rule.uid, strict_blocking);
+
+                    if (predefined.system.containsKey(info.packageName))
+                        rule.system = predefined.system.get(info.packageName);
+                    // if (info.applicationInfo.uid == Process.myUid())
+                    // rule.system = true;
+
+                    if (all ||
+                            ((rule.system ? show_system : show_user) &&
+                                    (show_nointernet || rule.internet) &&
+                                    (show_frozen || rule.enabled))) {
+                        rule.wifi_default = false;
+                        rule.other_default = false;
+                        rule.screen_wifi_default = false;
+                        rule.screen_other_default = false;
+                        rule.roaming_default = true;
+
+                        rule.wifi_blocked = false;
+                        rule.other_blocked = false;
+                        rule.screen_wifi = false;
+                        rule.screen_other = false;
+                        rule.roaming = true;
+
+                        rule.apply = apply.getBoolean(info.packageName, true);
+                        rule.tracker_protect = BlockingMode.isTrackerProtectionEnabled(
+                                context, tracker_protect, info.packageName);
+                        rule.wg_route = RemoteRoutingLogic.routesThroughTunnel(
+                                wgRouteMode,
+                                wg_route.contains(info.packageName)
+                                        ? wg_route.getBoolean(info.packageName, true)
+                                        : null,
+                                rule.apply);
+                        rule.notify = notify.getBoolean(info.packageName, true);
+
+                        // Related packages
+                        List<String> listPkg = new ArrayList<>();
+                        if (predefined.related.containsKey(info.packageName))
+                            listPkg.addAll(Arrays.asList(predefined.related.get(info.packageName)));
+                        for (PackageInfo pi : listPI)
+                            if (pi.applicationInfo.uid == rule.uid && !pi.packageName.equals(rule.packageName)) {
+                                rule.relateduids = true;
+                                listPkg.add(pi.packageName);
+                            }
+                        rule.related = listPkg.toArray(new String[0]);
+
+                        rule.hosts = dh.getHostCount(rule.uid, true);
+
+                        rule.updateChanged();
+
+                        // Check unprotected filter: when enabled, only show apps that are not protected
+                        boolean isUnprotected = !rule.apply || !rule.tracker_protect;
+                        if (!show_unprotected || isUnprotected) {
+                            listRules.add(rule);
+                        }
+                    }
+                } catch (Throwable ex) {
+                    Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                }
+
+            if (trackerDefaultsChanged)
+                trackerBlocklist.saveSettings(context);
+
+            // Load tracking counts
+            TrackerList trackerList = TrackerList.getInstance(context);
+            Pair<Pair<Map<Integer, Integer>, Integer>, Pair<Map<Integer, Integer>, Integer>> trackerCountsAndTotal = trackerList
+                    .getTrackerCountsAndTotal();
+
+            Pair<Map<Integer, Integer>, Integer> trackerCountsAndTotalAll = trackerCountsAndTotal.first();
+            Pair<Map<Integer, Integer>, Integer> trackerCountsAndTotalPastWeek = trackerCountsAndTotal.second();
+
+            trackerCounts = trackerCountsAndTotalAll.first();
+            trackerCountsPastWeek = trackerCountsAndTotalPastWeek.first();
+            trackerRecent = trackerList.getLastTrackerTimes();
+            int trackerTotal = trackerCountsAndTotalAll.second();
+
+            if (trackerTotal == 0
+                    && context instanceof Activity) {
+                int instructionsString = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+                        ? R.string.instructions_monitoring_private_dns
+                        : R.string.instructions_monitoring;
+
+                Snackbar s = Common.getSnackbar((Activity) context, instructionsString);
+                if (s != null) {
+                    s.setAction(R.string.ok, v1 -> s.dismiss());
+                    s.show();
+                }
+            }
+
+            // Sort rule list
+            final Collator collator = Collator.getInstance(Locale.getDefault());
+            collator.setStrength(Collator.SECONDARY); // Case insensitive, process accents etc
+
+            String sort = prefs.getString("sort", "trackers_week");
+            if ("uid".equals(sort))
+                Collections.sort(listRules, new Comparator<Rule>() {
+                    @Override
+                    public int compare(Rule rule, Rule other) {
+                        if (rule.uid < other.uid)
+                            return -1;
+                        else if (rule.uid > other.uid)
+                            return 1;
+                        else {
+                            int i = collator.compare(rule.name, other.name);
+                            return (i == 0 ? rule.packageName.compareTo(other.packageName) : i);
+                        }
+                    }
+                });
+            else if ("name".equals(sort))
+                Collections.sort(listRules, new Comparator<Rule>() {
+                    @Override
+                    public int compare(Rule rule, Rule other) {
+                        if (all || rule.changed == other.changed) {
+                            int i = collator.compare(rule.name, other.name);
+                            return (i == 0 ? rule.packageName.compareTo(other.packageName) : i);
+                        }
+                        return (rule.changed ? -1 : 1);
+                    }
+                });
+            else if ("trackers_recent".equals(sort)) {
+                Collections.sort(listRules, (a, b) -> {
+                    // Most recent tracker contact first
+                    int timeCmp = Long.compare(b.getLastTrackerTime(), a.getLastTrackerTime());
+                    if (timeCmp != 0) return timeCmp;
+
+                    // Tiebreak: alphabetical by app name, then package name
+                    int nameCmp = collator.compare(a.name, b.name);
+                    return nameCmp != 0 ? nameCmp : a.packageName.compareTo(b.packageName);
+                });
+            }
+            else
+                Collections.sort(listRules, new Comparator<Rule>() {
+                    @Override
+                    public int compare(Rule rule, Rule other) {
+                        boolean pastWeekOnly = !("trackers_all".equals(sort));
+
+                        if (rule.getTrackerCount(pastWeekOnly) < other.getTrackerCount(pastWeekOnly))
+                            return 1;
+                        else if (rule.getTrackerCount(pastWeekOnly) > other.getTrackerCount(pastWeekOnly))
+                            return -1;
+                        else {
+                            int i = collator.compare(rule.name, other.name);
+                            return (i == 0 ? rule.packageName.compareTo(other.packageName) : i);
+                        }
+                    }
+                });
+
+            return listRules;
+        }
+    }
+
+    /**
+     * Build a lightweight list of rules for ALL installed applications, for search only.
+     *
+     * The visible list built by {@link #getRules} applies the show_system / show_frozen /
+     * show_nointernet display filters. An app hidden by those filters (e.g. an OEM-preinstalled
+     * app that TC routes because "include system apps" is on, a frozen package, or a shared-UID
+     * sibling) can still be routed through the tun and filtered/blocked by UID, yet be absent
+     * from the list and therefore unreachable — the user cannot open it to add an exception or
+     * exclude it. That is the "blocked but not listed" breakage reported in issues #420
+     * (Instagram) and #483 (Feeder), whose only workaround is disabling TC entirely.
+     *
+     * Search therefore must reach every installed app, not just the currently-visible subset.
+     * This intentionally skips the expensive / side-effecting work in getRules (tracker counts,
+     * default seeding, sorting, snackbars): stubs only need enough to be matched by the search
+     * filter and to open the per-app details screen (name, package, uid, internet).
+     */
+    public static List<Rule> getSearchStubs(Context context) {
+        synchronized (context.getApplicationContext()) {
+            List<Rule> listStub = new ArrayList<>();
+
+            SharedPreferences apply = context.getSharedPreferences("apply", Context.MODE_PRIVATE);
+            SharedPreferences tracker_protect = context.getSharedPreferences("tracker_protect", Context.MODE_PRIVATE);
+            SharedPreferences wg_route = context.getSharedPreferences(PREF_WG_ROUTE, Context.MODE_PRIVATE);
+            SharedPreferences notify = context.getSharedPreferences("notify", Context.MODE_PRIVATE);
+            String wgRouteMode = RemoteRoutingLogic.normalizeMode(
+                    PreferenceManager.getDefaultSharedPreferences(context)
+                            .getString(PREF_WG_ROUTE_MODE, RemoteRoutingLogic.getDefaultMode()));
+
+            DatabaseHelper dh = DatabaseHelper.getInstance(context);
+            for (PackageInfo info : getPackages(context))
+                try {
+                    // Skip self
+                    if (info.applicationInfo.uid == Process.myUid())
+                        continue;
+
+                    Rule rule = new Rule(dh, info, context);
+                    rule.apply = apply.getBoolean(info.packageName, true);
+                    rule.tracker_protect = BlockingMode.isTrackerProtectionEnabled(
+                            context, tracker_protect, info.packageName);
+                    rule.wg_route = RemoteRoutingLogic.routesThroughTunnel(
+                            wgRouteMode,
+                            wg_route.contains(info.packageName)
+                                    ? wg_route.getBoolean(info.packageName, true)
+                                    : null,
+                            rule.apply);
+                    rule.notify = notify.getBoolean(info.packageName, true);
+                    rule.updateChanged();
+                    listStub.add(rule);
+                } catch (Throwable ex) {
+                    Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                }
+
+            return listStub;
+        }
+    }
+
+    private static List<String> getHandlingPackages(PackageManager pm, Intent intent) {
+        List<String> packagesList = new ArrayList<>();
+
+        int flag = PackageManager.MATCH_ALL;
+        List<ResolveInfo> activityList = pm.queryIntentActivities(intent, flag);
+        for (ResolveInfo info : activityList)
+            packagesList.add(info.activityInfo.packageName);
+
+        return packagesList;
+    }
+
+    private void updateChanged() {
+        changed = (hosts > 0 || !tracker_protect || !apply);
+    }
+
+    public void updateChanged(Context context) {
+        updateChanged();
+    }
+
+    @Override
+    public String toString() {
+        // This is used in the port forwarding dialog application selector
+        return this.name;
+    }
+}

@@ -1,0 +1,693 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="app_description">TrackerControl cho phép người dùng giám sát và kiểm soát sự thu thập thông tin lan rộng, liên tục, không thể thấy trong các ứng dụng di động về hành vi người dùng (\'theo dõi\').</string>
+    <string name="app_copyright">Bản quyền \u00A9 2019–2022 Konrad Kollnig\n\nTrackerControl dựa trên NetGuard, do Marcel Bokhorst (M66B) phát triển.</string>
+    <string name="app_android">TrackerControl yêu cầu Android 5.1 hoặc cao hơn</string>
+    <string name="app_xposed">Xposed gây ra quá nhiều lỗi, điều đó có thể dẫn đến TrackerControl bị gỡ bỏ khỏi cửa hàng Google Play, do đó TrackerControl không được hỗ trợ khi Xposed được cài đặt</string>
+    <string name="app_eula">Bạn tự chịu rủi ro khi sử dụng ứng dụng này. Không ứng dụng nào có thể bảo vệ bạn 100% khỏi việc theo dõi.</string>
+    <string name="app_privacy"><a href="https://github.com/TrackerControl/tracker-control-android#privacy-notice">Chính sách quyền riêng tư</a> <a href="https://github.com/TrackerControl/tracker-control-android#cookie-policy">Chính sách cookie</a></string>
+    <string name="app_ios"><a href="https://ios.trackercontrol.org">TrackerControl cũng có trên iOS</a></string>
+    <string name="channel_foreground">Các dịch vụ đang chạy</string>
+    <string name="channel_notify">Thông báo chung</string>
+    <string name="channel_access">Thông báo truy cập</string>
+    <string name="menu_search">Tìm kiếm ứng dụng</string>
+    <string name="menu_filter">Lọc ứng dụng</string>
+    <string name="menu_app_user">Hiện ứng dụng người dùng</string>
+    <string name="menu_app_system">Hiện ứng dụng hệ thống</string>
+    <string name="menu_app_nointernet">Hiện ứng dụng không có internet</string>
+    <string name="menu_app_unprotected">Chỉ hiển thị ứng dụng không được bảo vệ</string>
+    <string name="menu_app_frozen">Hiển thị ứng dụng bị đóng băng</string>
+    <string name="menu_sort">Sắp xếp ứng dụng</string>
+    <string name="menu_sort_name">Sắp xếp theo tên</string>
+    <string name="menu_sort_uid">Sắp xếp theo uid</string>
+    <string name="menu_sort_companies_week">Sắp xếp theo công ty (tuần)</string>
+    <string name="menu_sort_companies">Sắp xếp theo công ty</string>
+    <string name="menu_sort_by_latest_detected_tracker">Sắp xếp theo trình theo dõi được phát hiện mới nhất</string>
+    <string name="menu_log">Nhật ký lưu lượng</string>
+    <string name="menu_settings">Cài đặt</string>
+    <string name="menu_invite">Mời</string>
+    <string name="menu_legend">Chú giải</string>
+    <string name="menu_support">Hỗ trợ ứng dụng này</string>
+    <string name="menu_log_support">Giải thích</string>
+    <string name="menu_troubleshooting">Giải quyết vấn đề</string>
+    <string name="menu_about">Giới thiệu</string>
+    <string name="timeline_empty_disabled_title">TrackerControl đang tắt</string>
+    <string name="timeline_empty_disabled_subtitle">Bật TrackerControl bằng nút gạt bên trên phải. Hoạt động của trình theo dõi từ các ứng dụng của bạn sẽ hiển thị ở đây.</string>
+    <string name="timeline_empty_enabled_title">Xem các trình theo dõi…</string>
+    <string name="timeline_empty_enabled_subtitle">Hầu hết ứng dụng chỉ liên hệ trình theo dõi khi bạn dùng. Mở một ứng dụng, rồi quay lại - hoạt động của trình theo dõi của bạn sẽ hiện lên ở đây.</string>
+    <string name="timeline_empty_recording_off_title">Đã tắt ghi hoạt động trình theo dõi</string>
+    <string name="timeline_empty_recording_off_subtitle">\"Tìm trình theo dõi mới\" đang tắt trong Cài đặt nâng cao. Trình theo dõi vẫn bị chặn nhưng không còn được ghi lại, nên Dòng thời gian này vẫn trống. Bật lại để xem hoạt động của trình theo dõi.</string>
+    <string name="timeline_empty_recording_unavailable_title">Không thể ghi hoạt động trình theo dõi</string>
+    <string name="timeline_empty_recording_unavailable_subtitle">Phiên bản TrackerControl này không cung cấp tính năng ghi hoạt động trình theo dõi. Tính năng chặn vẫn hoạt động, nhưng Dòng thời gian này sẽ vẫn trống.</string>
+    <string name="timeline_open_app">Mở một ứng dụng</string>
+    <string name="timeline_open_settings">Mở cài đặt</string>
+    <string name="timeline_hint_tap_entry">Ứng dụng không hoạt động? Nhấn vào mục của ứng dụng để điều chỉnh chế độ bảo vệ.</string>
+    <string name="timeline_hint_dismiss">Đã hiểu</string>
+    <string name="unidentified_app_uid">Ứng dụng không xác định (UID %1$d)</string>
+    <string name="tab_timeline">Thanh thời gian</string>
+    <string name="tab_apps">Các ứng dụng</string>
+    <string name="tab_vpn">VPN</string>
+    <string name="timeline_section_last_hour">Một giờ trước</string>
+    <string name="timeline_section_today">Hôm nay</string>
+    <string name="timeline_section_yesterday">Hôm qua</string>
+    <string name="timeline_section_this_week">Tuần này</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="timeline_more_trackers" tools:ignore="PluralsCandidate">+%d thêm</string>
+    <string name="timeline_tracker_blocked">Đã chặn</string>
+    <string name="timeline_tracker_allowed">Đã cho phép</string>
+    <!-- A blocked/allowed label followed by its share of all tracking attempts. -->
+    <string name="feed_section_last_contact">liên hệ gần nhất %s</string>
+    <plurals name="feed_show_more_companies">
+        <item quantity="other">Hiện thêm %d công ty</item>
+    </plurals>
+    <string name="feed_allow_company_in_app">Cho phép %1$s trong %2$s</string>
+    <string name="feed_block_company_in_app">Chặn %1$s trong %2$s</string>
+    <string name="feed_allowed_by_you">Bạn đã cho phép</string>
+    <string name="feed_allowed_shared_ip">Đã cho phép · IP dùng chung</string>
+    <string name="feed_monitored">Đang giám sát</string>
+    <string name="feed_company_expanded">Đã mở rộng</string>
+    <string name="feed_company_collapsed">Đã thu gọn</string>
+    <string name="feed_essential_explainer">Ứng dụng cần — đã cho phép để %s tiếp tục hoạt động</string>
+    <string name="feed_essential_explainer_blocked">Ứng dụng cần — chặn các mục này có thể làm %s hỏng</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="timeline_summary_mixed" tools:ignore="PluralsCandidate">%1$d đã chặn · %2$d đã cho phép</string>
+    <plurals name="timeline_trackers_blocked">
+        <item quantity="other">Đã chặn %d trình theo dõi</item>
+    </plurals>
+    <plurals name="timeline_trackers_allowed">
+        <item quantity="other">Đã cho phép %d trình theo dõi</item>
+    </plurals>
+    <string name="troubleshooting_title">Xử lý sự cố</string>
+    <string name="troubleshooting_battery_title">Tối ưu hoá pin</string>
+    <string name="troubleshooting_battery_desc">Nếu TrackerControl ngừng hoạt động trong nền, hãy tắt tối ưu hoá pin của TrackerControl trên Android. Chọn \"Tất cả ứng dụng\", nhấn TrackerControl rồi chọn \"Không tối ưu hoá\".</string>
+    <string name="troubleshooting_battery_action">Tắt tối ưu hoá pin</string>
+    <string name="troubleshooting_battery_ok">Tối ưu hoá pin đã được tắt.</string>
+    <string name="troubleshooting_datasaver_title">Trình tiết kiệm dữ liệu</string>
+    <string name="troubleshooting_datasaver_desc">Nếu TrackerControl không thể kết nối khi Trình tiết kiệm dữ liệu bật, hãy cho phép TrackerControl sử dụng dữ liệu không hạn chế. Bật \"Dữ liệu nền\" và \"Sử dụng dữ liệu không hạn chế\".</string>
+    <string name="troubleshooting_datasaver_action">Cho phép dữ liệu không hạn chế</string>
+    <string name="troubleshooting_datasaver_ok">Trình tiết kiệm dữ liệu không hạn chế TrackerControl.</string>
+    <string name="troubleshooting_local_network_title">Truy cập mạng cục bộ</string>
+    <string name="troubleshooting_local_network_desc">Cần quyền truy cập cho máy chủ DNS cục bộ, các máy ngang hàng WireGuard và proxy.</string>
+    <string name="troubleshooting_local_network_action">Cho phép truy cập mạng cục bộ</string>
+    <string name="troubleshooting_local_network_ok">Đã cho phép truy cập mạng cục bộ.</string>
+    <string name="troubleshooting_app_breakage_title">Ứng dụng ngừng hoạt động</string>
+    <string name="troubleshooting_app_breakage_desc">Nhấn vào ứng dụng trong danh sách chính, rồi nhấn Bảo vệ. Trước tiên hãy thử \"Chỉ chặn tối thiểu\". Nếu ứng dụng vẫn gặp vấn đề, chọn \"Cho phép trình theo dõi\". Chỉ dùng \"Bỏ qua TrackerControl\" như biện pháp cuối cùng.</string>
+    <string name="troubleshooting_categories_title">Chặn các danh mục trình theo dõi cụ thể</string>
+    <string name="troubleshooting_categories_desc">Bạn có thể tinh chỉnh việc chặn cho từng ứng dụng bằng cách nhấn vào ứng dụng rồi bật hoặc tắt từng danh mục trình theo dõi (ví dụ: Phân tích, Quảng cáo) trong thẻ Trình theo dõi.</string>
+    <string name="troubleshooting_alwayson_title">VPN luôn bật</string>
+    <string name="troubleshooting_alwayson_desc">Nếu \"Chặn kết nối khi không có VPN\" (khoá mạng) được bật trong cài đặt VPN của Android, TrackerControl không thể hoạt động chính xác. Hãy tắt tuỳ chọn này.</string>
+    <string name="troubleshooting_alwayson_action">Mở cài đặt VPN</string>
+    <string name="menu_apps">Ứng dụng khác</string>
+    <string name="menu_protocol_other">Khác</string>
+    <string name="menu_traffic_allowed">Đã cho phép</string>
+    <string name="menu_traffic_blocked">Đã chặn</string>
+    <string name="menu_live">Cập nhật trực tiếp</string>
+    <string name="menu_refresh">Làm mới</string>
+    <string name="menu_resolve">Hiện tên</string>
+    <string name="menu_organization">Hiện tổ chức</string>
+    <string name="menu_pcap_enabled">PCAP được bật</string>
+    <string name="menu_pcap_export">Xuất PCAP</string>
+    <string name="menu_clear">Xóa</string>
+    <string name="menu_clear_activity">Xoá hoạt động đã ghi</string>
+    <string name="menu_export">Xuất</string>
+    <string name="menu_reset">Đặt lại</string>
+    <string name="menu_cleanup">Dọn dẹp</string>
+    <string name="setting_options">Chung</string>
+    <string name="setting_further_options">Tuỳ chọn khác</string>
+    <string name="setting_pause">Tự động bật sau %1$s phút</string>
+    <string name="setting_update">Kiểm tra cập nhật</string>
+    <plurals name="pause">
+        <item quantity="other">Tạm dừng %d phút</item>
+    </plurals>
+    <string name="setting_ip6">Bật lưu lượng IPv6</string>
+    <string name="setting_call">Tắt khi có cuộc gọi</string>
+    <string name="setting_reload_onconnectivity">Tải lại mỗi lần đổi kết nối</string>
+    <string name="setting_tcp_mss_clamp">Chế độ tương thích chia sẻ kết nối</string>
+    <string name="summary_tcp_mss_clamp">Định tuyến toàn bộ lưu lượng qua TrackerControl và giới hạn kích thước phân đoạn TCP để sửa các kết nối chia sẻ bị treo hoặc không có Internet. Truy cập mạng cục bộ không còn bỏ qua TrackerControl và hiệu năng có thể giảm.</string>
+    <string name="setting_advanced_options">Tuỳ chọn nâng cao (dành cho chuyên gia)</string>
+    <string name="setting_log_app">Tìm kiếm trình theo dõi mới</string>
+    <string name="setting_log_logcat">Nghiên cứu</string>
+    <string name="setting_handover">Chuyển giao VPN liền mạch khi tải lại</string>
+    <string name="setting_reset_usage">Đặt lại sử dụng mạng</string>
+    <string name="setting_show_resolved">Hiện các tên miền đã xử lý</string>
+    <string name="setting_exclude_all_tracking">Loại trừ mọi ứng dụng khỏi việc theo dõi</string>
+    <string name="summary_exclude_all_tracking">Tắt giám sát trình theo dõi cho mọi ứng dụng. Sau đó bạn có thể bật lại cho từng ứng dụng.</string>
+    <string name="setting_include_all_tracking">Bao gồm mọi ứng dụng trong việc theo dõi</string>
+    <string name="summary_include_all_tracking">Bật lại giám sát trình theo dõi cho mọi ứng dụng.</string>
+    <string name="setting_block_domains">Bật tệp máy chủ</string>
+    <string name="setting_rcode">Phản hồi chặn máy chủ: %s</string>
+    <string name="setting_vpn4">VPN IPv4: %s</string>
+    <string name="setting_vpn6">VPN IPv6: %s</string>
+    <string name="setting_dns">VPN DNS: %s</string>
+    <string name="setting_validate">Xác thực tại: %s</string>
+    <string name="setting_ttl">DNS TTL tối thiểu: %s s</string>
+    <string name="setting_socks5_enabled">Sử dụng proxy SOCKS5</string>
+    <string name="setting_socks5_addr">Địa chỉ SOCKS5: %s</string>
+    <string name="setting_socks5_port">Cổng SOCKS5: %s</string>
+    <string name="setting_socks5_username">Tên người dùng SOCKS5: %s</string>
+    <string name="setting_socks5_password">Mật khẩu SOCKS5: %s</string>
+    <string name="setting_wg_enabled">Định tuyến lưu lượng qua WireGuard</string>
+    <string name="setting_wg_profile">Cấu hình WireGuard</string>
+    <string name="setting_wg_profile_manage">Cấu hình WireGuard tuỳ chỉnh</string>
+    <string name="setting_wg_profile_import">Nhập cấu hình WireGuard</string>
+    <string name="setting_wg_profile_scan">Quét mã QR</string>
+    <string name="setting_wg_profile_import_file">Nhập từ tệp hoặc kho lưu trữ</string>
+    <string name="setting_wg_mullvad_setup">Thiết lập Mullvad</string>
+    <string name="setting_wg_proton_setup">Dùng cấu hình Proton VPN</string>
+    <string name="setting_wg_keepalive_when_screen_off">Giữ WireGuard hoạt động khi tắt màn hình</string>
+    <string name="setting_wg_profile_save">Lưu cấu hình</string>
+    <string name="setting_wg_profile_delete">Xoá cấu hình</string>
+    <string name="accessibility_wg_profile_edit">Chỉnh sửa cấu hình WireGuard %1$s</string>
+    <string name="accessibility_wg_profile_delete">Xoá cấu hình WireGuard %1$s</string>
+    <string name="setting_wireguard">WireGuard (bản xem trước)</string>
+    <string name="setting_wg_status">Trạng thái</string>
+    <string name="setting_vpn_key_rotate_now">Xoay khoá nhà cung cấp VPN ngay</string>
+    <string name="setting_pcap_record_size">Kích cỡ bản ghi PCAP: %s B</string>
+    <string name="setting_pcap_file_size">Kích thước tệp PCAP lớn nhất: %s MB</string>
+    <!-- Secure DNS (DoH) -->
+    <string name="setting_doh_enabled">DNS bảo mật (DoH)</string>
+    <string name="summary_doh_enabled">Mã hoá truy vấn DNS bằng DNS-over-HTTPS. Tự động tạm dừng khi WireGuard hoạt động vì các truy vấn đó dùng đường hầm WireGuard.</string>
+    <string name="warning_beta">Tính năng beta. Có thể không hoạt động như mong đợi.</string>
+    <string name="setting_doh_endpoint">URL điểm cuối DoH</string>
+    <string name="summary_doh_endpoint">URL HTTPS cho các truy vấn DNS-over-HTTPS</string>
+    <string name="dialog_doh_endpoint">Nhập URL HTTPS đầy đủ do nhà cung cấp DNS của bạn cung cấp, bao gồm đường dẫn riêng của nhà cung cấp (ví dụ: https://dns.quad9.net/dns-query). Các ứng dụng bị loại khỏi TrackerControl hoặc dùng DNS mã hóa riêng sẽ bỏ qua cài đặt này.</string>
+    <string name="setting_doh_dns_fallback">DNS dự phòng</string>
+    <string name="summary_doh_dns_fallback">Dùng DNS tiêu chuẩn (không mã hoá) khi DoH không khả dụng. Tắt tuỳ chọn này có thể làm ứng dụng hỏng nếu máy chủ DoH ngừng hoạt động.</string>
+    <string name="msg_invalid_doh_endpoint">Nhập URL HTTPS đầy đủ cho DNS-over-HTTPS, bao gồm đường dẫn của nhà cung cấp (ví dụ: https://dns.quad9.net/dns-query).</string>
+    <!-- Block DNS-over-TLS (DoT) -->
+    <string name="setting_block_dot">Chặn DNS riêng của Android</string>
+    <string name="summary_block_dot">Khi DNS riêng của Android bật, TC không thể phát hiện việc theo dõi và không hoạt động đúng.</string>
+    <string name="setting_stats_frequency">Thời gian giữa mỗi lần lấy mẫu: %s ms</string>
+    <string name="setting_stats_samples">Số lượng các mẫu: %s s</string>
+    <string name="setting_backup">Sao lưu</string>
+    <string name="setting_export">Xuất cài đặt</string>
+    <string name="setting_import">Nhập cài đặt</string>
+    <string name="setting_hosts_update">Cập nhật tệp máy chủ</string>
+    <string name="setting_hosts_auto_update">Tự động cập nhật hosts</string>
+    <string name="summary_hosts_auto_update">Tự động cập nhật tệp hosts trong nền</string>
+    <string name="summary_pause">Sau khi tạm dừng từ thông báo, tự động bật lại TrackerControl sau số phút được chọn (nhập 0 để tắt tùy chọn này).</string>
+    <string name="summary_update">Kiểm tra phiên bản mới trên GitHub hai lần mỗi ngày</string>
+    <string name="summary_ip6">Định tuyến lưu lượng IPv6 đến TrackerControl để nó có thể được cho phép hoặc chặn một cách có chọn lọc</string>
+    <string name="summary_call">Tắt TrackerControl khi có cuộc gọi đến hoặc đi. Việc này có thể được sử dụng để khắc phục các sự cố gọi IP/Wi-Fi.</string>
+    <string name="summary_log_app">Tắt để giảm sử dụng pin. Các trình theo dõi mới vẫn sẽ được chặn, nhưng không được hiện.</string>
+    <string name="summary_block_domains">CẢNH BÁO: Các miền bị chặn không được hiện trên giao diện.</string>
+    <string name="summary_rcode">Giá trị mặc định là 3 (NXDOMAIN), có nghĩa là \'miền không tồn tại\'.</string>
+    <string name="summary_validate">Tên miền được sử dụng để xác thực kết nối internet tại cổng 443 (https).</string>
+    <string name="summary_socks5_enabled">Chỉ có lưu lượng TCP sẽ được gửi đến máy chủ proxy</string>
+    <string name="summary_wg_enabled">Ẩn IP của thiết bị. Định tuyến TCP và UDP ra ngoài qua đường hầm. Ứng dụng sẽ thấy lỗi mạng khi mất kết nối — hệ thống đóng khi lỗi, không chuyển sang kết nối trực tiếp. Kết nối do máy chủ khởi tạo đến điện thoại có thể không hoạt động khi đường hầm không hoạt động (tắt keepalive để tiết kiệm pin).</string>
+    <string name="summary_wg_config">Dán cấu hình [Interface] / [Peer] từ nhà cung cấp của bạn</string>
+    <string name="summary_wg_profile">Chọn cấu hình WireGuard đã lưu</string>
+    <string name="summary_wg_profile_none">Chưa có cấu hình đã lưu</string>
+    <string name="summary_wg_profile_manage">Thêm, chỉnh sửa hoặc xoá cấu hình WireGuard tuỳ chỉnh</string>
+    <string name="summary_wg_keepalive_when_screen_off">Gửi các gói keepalive theo khoảng thời gian đặt trong cấu hình WireGuard ngay cả khi tắt màn hình. Cải thiện độ tin cậy trên các mạng làm rớt kết nối nhàn rỗi, nhưng tăng mức dùng pin.</string>
+    <string name="summary_wg_status_off">Tắt</string>
+    <string name="summary_wg_status_missing_config">Tắt — chưa đặt cấu hình</string>
+    <string name="summary_wg_status_connected">Đã kết nối</string>
+    <string name="summary_wg_status_handshaking">Đang bắt tay…</string>
+    <string name="summary_wg_status_blocked">Đã chặn — %s</string>
+    <string name="summary_wg_status_starting">Đang khởi động</string>
+    <string name="summary_vpn_key_rotate_now">Buộc xoay khoá WireGuard của Mullvad và IVPN để gỡ lỗi</string>
+    <string name="msg_vpn_key_rotation_started">Đã bắt đầu xoay khoá VPN</string>
+    <string name="msg_wg_config_invalid">Cấu hình WireGuard không hợp lệ: %s</string>
+    <string name="msg_wg_profile_name">Tên cấu hình</string>
+    <string name="msg_wg_profile_default_name">Mặc định</string>
+    <string name="msg_wg_profile_saved">Đã lưu cấu hình WireGuard</string>
+    <string name="msg_wg_profile_deleted">Đã xoá cấu hình WireGuard</string>
+    <string name="msg_wg_profile_empty">Chưa có cấu hình nào</string>
+    <string name="msg_wg_profile_active">Đang hoạt động</string>
+    <string name="msg_wg_profile_set_active">Đặt làm cấu hình hoạt động</string>
+    <string name="msg_wg_profile_config_hint" tools:ignore="TypographyEllipsis">[Interface]\nPrivateKey = …\nAddress = …\n\n[Peer]\nPublicKey = …\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = …</string>
+    <string name="msg_wg_profile_delete_confirm">Xoá cấu hình WireGuard này?</string>
+    <string name="msg_wg_profile_scan_hint">Hướng camera vào mã QR WireGuard do nhà cung cấp VPN hiển thị. Quá trình quét diễn ra trên thiết bị của bạn.</string>
+    <string name="msg_wg_profile_scan_no_camera">Thiết bị này không có camera để quét</string>
+    <string name="msg_wg_profile_scan_no_camera_permission">Cần quyền camera để quét mã QR</string>
+    <string name="msg_wg_profile_scan_failed">Không thể khởi động camera: %1$s</string>
+    <string name="msg_wg_profile_scan_not_config">Mã QR này không phải cấu hình WireGuard: %1$s</string>
+    <string name="msg_wg_profile_import_none">Không tìm thấy cấu hình WireGuard trong tệp đã chọn</string>
+    <string name="msg_wg_profile_import_failed">Không thể đọc tệp đã chọn: %1$s</string>
+    <plurals name="msg_wg_profile_imported">
+        <item quantity="other">Đã nhập %1$d cấu hình WireGuard</item>
+    </plurals>
+    <plurals name="msg_wg_profile_import_skipped">
+        <item quantity="other">Đã bỏ qua %1$d tệp: không phải các cấu hình WireGuard hợp lệ</item>
+    </plurals>
+    <string name="msg_wg_mullvad_account">Số tài khoản Mullvad</string>
+    <string name="msg_wg_mullvad_recommended">Vị trí đề xuất</string>
+    <string name="msg_wg_mullvad_note">TrackerControl tạo cấu hình WireGuard cho Mullvad. Số tài khoản được lưu cục bộ để dùng cho các cấu hình Mullvad sau này. Mã thông báo không được lưu, và xoá cấu hình ở đây không xoá thiết bị khỏi Mullvad.</string>
+    <string name="msg_wg_mullvad_generating">Đang tạo cấu hình WireGuard…</string>
+    <string name="msg_wg_mullvad_failed">Thiết lập Mullvad thất bại: %s</string>
+    <string name="msg_wg_mullvad_countries_failed">Không thể tải các quốc gia Mullvad: %s</string>
+    <string name="msg_wg_proton_note">Thiết lập bên thứ ba được Proton ghi lại dùng các cấu hình WireGuard có thể tải xuống. TrackerControl không cần thông tin đăng nhập Proton và không thể tự động làm mới cấu hình.\n\nĐăng nhập tại account.protonvpn.com, đi tới Tải xuống → Cấu hình WireGuard, tải cấu hình xuống, mở bằng trình soạn thảo văn bản rồi sao chép và dán nội dung vào đây.</string>
+    <string name="msg_wg_proton_open_dashboard">Mở bảng điều khiển Proton VPN</string>
+    <string name="vpn_status_relay">Chuyển tiếp: %s</string>
+    <string name="vpn_status_wireguard_connected">WireGuard đã kết nối</string>
+    <string name="vpn_status_disconnected">Chưa kết nối</string>
+    <string name="vpn_intro_title">Bản xem trước VPN</string>
+    <string name="vpn_intro_body">VPN gửi lưu lượng Internet của bạn qua một máy chủ khác. Điều này có thể ẩn địa chỉ IP của bạn với các trang web và nhà cung cấp mạng, đồng thời cho phép bạn chọn quốc gia cho kết nối. Thẻ này còn mới, nên hãy xem đây là bản xem trước.</string>
+    <string name="vpn_intro_mullvad_title">Mullvad</string>
+    <string name="vpn_intro_mullvad_body">Nhà cung cấp VPN tập trung vào quyền riêng tư. Chi phí là 5 € mỗi tháng và dùng số tài khoản thay vì địa chỉ email. Nhập số tài khoản, rồi chọn quốc gia trong TrackerControl.</string>
+    <string name="vpn_intro_ivpn_title">IVPN</string>
+    <string name="vpn_intro_ivpn_body">Nhà cung cấp VPN tập trung vào quyền riêng tư và hỗ trợ WireGuard. Nhập ID tài khoản IVPN, rồi chọn quốc gia trong TrackerControl.</string>
+    <string name="vpn_intro_proton_body">Tải cấu hình WireGuard từ tài khoản Proton VPN rồi dán vào TrackerControl. Bạn không bao giờ nhập thông tin đăng nhập Proton tại đây.</string>
+    <string name="vpn_intro_wireguard_body">Dùng tuỳ chọn này nếu bạn đã có cấu hình WireGuard từ nhà cung cấp VPN khác, máy chủ của riêng bạn hoặc nơi làm việc.</string>
+    <string name="vpn_enter_mullvad_account">Nhập số tài khoản</string>
+    <string name="vpn_enter_ivpn_account">Nhập ID tài khoản</string>
+    <string name="vpn_mode_wireguard">WireGuard</string>
+    <string name="vpn_settings">Cài đặt Mullvad</string>
+    <string name="vpn_settings_title">Cài đặt Mullvad</string>
+    <string name="vpn_ivpn_settings">Cài đặt IVPN</string>
+    <string name="vpn_ivpn_settings_title">Cài đặt IVPN</string>
+    <string name="vpn_account_number">Tài khoản: %s</string>
+    <string name="vpn_account_not_set">Tài khoản: chưa thiết đặt</string>
+    <string name="vpn_account_show">Hiển thị</string>
+    <string name="vpn_account_hide">Ẩn</string>
+    <string name="vpn_account_change">Thay đổi</string>
+    <string name="vpn_account_cancel">Hủy</string>
+    <string name="vpn_mullvad_intro">Nhập số tài khoản Mullvad của bạn. Nó được lưu trên thiết bị này.</string>
+    <string name="vpn_mullvad_account_note">Tài khoản này được dùng cho các kết nối Mullvad đến quốc gia.</string>
+    <string name="vpn_get_mullvad_account">Lấy tài khoản Mullvad</string>
+    <string name="vpn_get_ivpn_account">Lấy tài khoản IVPN</string>
+    <string name="vpn_account_hint">Số tài khoản Mullvad</string>
+    <string name="vpn_ivpn_intro">Nhập số tài khoản IVPN của bạn. Nó được lưu trên thiết bị này.</string>
+    <string name="vpn_ivpn_captcha_intro">IVPN cần xác thực CAPTCHA trước khi tạo một phiên WireGuard.</string>
+    <string name="vpn_ivpn_account_hint">ID tài khoản IVPN</string>
+    <string name="vpn_ivpn_captcha_hint">Chữ CAPTCHA</string>
+    <string name="vpn_account_save">Lưu</string>
+    <string name="vpn_account_saved">Tài khoản đã được lưu</string>
+    <string name="vpn_no_wireguard_profiles">Chưa có hồ sơ WireGuard tùy chỉnh</string>
+    <string name="vpn_import_wireguard_profile">Nhập hồ sơ WireGuard</string>
+    <string name="vpn_manage_wireguard_profiles">Quản lý các hồ sơ WireGuard</string>
+    <string name="vpn_country_load_failed">Không thể tải %1$s quốc gia: %2$s</string>
+    <string name="vpn_country_load_failed_short">Không thể tải quốc gia</string>
+    <string name="vpn_choose_country_first">Chọn một quốc gia trước</string>
+    <string name="vpn_choose_profile_first">Chọn một hồ sơ WireGuard trước</string>
+    <string name="vpn_setup_required">Thiết lập hồ sơ Mullvad hoặc nhập một hồ sơ WireGuard trước</string>
+    <string name="vpn_loading_countries">Đang tải các quốc gia…</string>
+    <string name="vpn_generating">Đang tạo hồ sơ WireGuard…</string>
+    <string name="vpn_generation_failed">Thiết lập VPN đã thất bại: %s</string>
+    <string name="vpn_retry">Thử lại</string>
+    <string name="vpn_country_selected">OK</string>
+    <string name="msg_wg_blocked_title">Đường hầm WireGuard không khả dụng</string>
+    <string name="msg_wg_blocked">Truy cập Internet bị chặn khi đường hầm WireGuard không khả dụng. Hãy tắt cài đặt WireGuard để khôi phục.</string>
+    <!-- The cause comes first so it does not read as a tunnel that never
+         started when the detail says it stopped responding. The tail stays
+         neutral about recovery: some causes, such as a lapsed subscription,
+         never resolve on their own. Each %s already names its own remedy
+         where it has one, so this must not repeat it. -->
+    <string name="msg_wg_blocked_detail">%s Truy cập Internet vẫn bị chặn cho đến khi sự cố được khắc phục hoặc cài đặt WireGuard bị tắt.</string>
+    <string name="msg_wg_identity_renewed_title">Đã đăng ký lại thiết bị VPN</string>
+    <string name="msg_wg_identity_renewed">%1$s không còn nhận ra thiết bị này, nên TrackerControl đã đăng ký thiết bị mới và cập nhật các cấu hình %1$s trên thiết bị này.</string>
+    <!-- Ends in a full stop: msg_wg_blocked_detail appends a sentence after it. -->
+    <string name="msg_wg_provider_rejected">%1$s đã từ chối thiết lập thiết bị này: %2$s.</string>
+    <string name="msg_wg_account_expired">%1$s báo rằng tài khoản này không còn thời gian sử dụng, nên sẽ không máy chủ nào chấp nhận đường hầm cho đến khi được gia hạn.</string>
+    <string name="msg_wg_recovery_failed">WireGuard đã ngừng phản hồi và TrackerControl đang cố kết nối lại.</string>
+    <string name="summary_log_logcat">Chế độ nghiên cứu sẽ tắt tính năng chặn trình theo dõi. Các trình theo dõi được nhận diện sẽ được ghi vào ADB và bật trích xuất SNI để phát hiện tên máy chủ tốt hơn. Lấy nhật ký bằng adb logcat với thẻ \'TC-Log\'.</string>
+    <string name="msg_research_mode_notice">Chế độ nghiên cứu đang bật. Tính năng chặn trình theo dõi đã bị tắt. Chạm để thay đổi cài đặt.</string>
+    <string name="msg_sure">Bạn có chắc không?</string>
+    <string name="msg_started">Đang tìm trình theo dõi…</string>
+    <string name="msg_waiting">Đang đợi sự kiện</string>
+    <string name="msg_disabled">Sử dụng công tắc ở trên để bật TrackerControl.</string>
+    <string name="msg_revoked">TrackerControl đã bị ngắt kết nối, có thể do ứng dụng VPN khác hoặc hệ thống. Chạm để kết nối lại.</string>
+    <string name="msg_installed">Có vấn đề với %1$s?</string>
+    <string name="msg_installed_description">Cho phép ứng dụng liên hệ các công ty</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="msg_installed_tracker_libraries_found" tools:ignore="PluralsCandidate">Chứa %d thư viện trình theo dõi</string>
+    <string name="msg_completed">Hành động hoàn tất</string>
+    <string name="msg_no_file_manager">Không tìm thấy trình quản lý tệp để chọn tệp.</string>
+    <string name="msg_no_browser">Không tìm thấy ứng dụng trình duyệt để mở liên kết.</string>
+    <string name="msg_vpn">TrackerControl sử dụng một VPN cục bộ để lọc lưu lượng internet. Vì lý do này, hãy cho phép một kết nối VPN trong hộp thoại tiếp theo. Lưu lượng internet của bạn không được gửi đến một máy chủ VPN từ xa.</string>
+    <string name="msg_autostart">TrackerControl không thể tự động khởi động. Điều này có khả năng là do một lỗi trong phiên bản Android của bạn.</string>
+    <string name="msg_error">Một lỗi không mong đợi đã xảy ra: \'%s\'</string>
+    <string name="msg_native_fd_recovery_exhausted">VPN liên tục hết bộ mô tả tệp. Tính năng bảo vệ đã dừng sau khi mọi lần tự động khởi động lại đều thất bại.</string>
+    <string name="msg_native_fd_error">VPN đã hết bộ mô tả tệp. Hãy đóng các ứng dụng không dùng hoặc khởi động lại thiết bị, rồi khởi động lại tính năng bảo vệ.</string>
+    <string name="msg_vpn_replacement_recovery_exhausted">TrackerControl không thể thiết lập lại VPN. Lưu lượng đang bị chặn.</string>
+    <string name="msg_doh_unreachable">Không thể truy cập DNS bảo mật (DoH) dù bạn đang có kết nối Internet. Nếu việc này lặp lại, hãy cân nhắc tắt tính năng này trong cài đặt Mạng.</string>
+    <string name="msg_start_failed">Android đã từ chối khởi động dịch vụ VPN tại lúc này. Điều này có khả năng là do một lỗi trong phiên bản Android của bạn.</string>
+    <string name="msg_try">Thử TrackerControl</string>
+    <string name="msg_log_disabled">Ghi nhật ký lưu lượng đang tắt, hãy sử dụng công tắc ở trên để bật ghi nhật ký. Việc ghi nhật ký lưu lượng có thể dẫn đến sử dụng thêm pin.</string>
+    <string name="msg_clear_activity">Thao tác này xoá hoạt động đã ghi của ứng dụng này. Các cài đặt chặn/cho phép theo từng trình theo dõi của ứng dụng này vẫn được giữ lại.</string>
+    <string name="msg_update_last">Lần cập nhật cuối: %s</string>
+    <string name="msg_metered">Mạng có trả phí</string>
+    <string name="msg_inactive">Không có kết nối internet hoạt động</string>
+    <string name="msg_queue">TrackerControl đang bận</string>
+    <string name="msg_update">Có bản cập nhật, nhấn để tải xuống</string>
+    <string name="title_version">Phiên bản %1$d</string>
+    <string name="msg_push">Các thông báo đến (đẩy) phần lớn là được thành phần Dịch vụ Play của hệ thống xử lý, nó được cho phép truy cập internet theo mặc định</string>
+    <string name="msg_system">Việc quản lý ứng dụng hệ thống có thể được bật trong cài đặt</string>
+    <string name="msg_vpn_cancelled">Đã hủy kết nối VPN\nBạn đã thiết lập một VPN khác làm VPN luôn bật à?</string>
+    <string name="msg_unavailable">Tính năng này không có sẵn trong phiên bản Android này</string>
+    <string name="msg_always_on">Một VPN khác được đặt là VPN luôn bật</string>
+    <string name="msg_always_on_lockdown">Tắt \"Chặn kết nối khi không có VPN\" trong cài đặt VPN của Android để dùng TrackerControl</string>
+    <string name="msg_start_forward">Bắt đầu chuyển tiếp từ cổng %1$s %2$d đến %3$s:%4$d của \'%5$s\'?</string>
+    <string name="msg_stop_forward">Dừng chuyển tiếp cổng %1$s %2$d?</string>
+    <string name="msg_log_logcat">Cảnh báo: Việc chặn đã bị tắt vì ghi nhật ký ADB.</string>
+    <string-array name="protocolNames">
+        <item>UDP</item>
+        <item>TCP</item>
+    </string-array>
+    <string name="menu_add">Thêm</string>
+    <string name="menu_delete">Xóa</string>
+    <string name="setting_forwarding">Chuyển tiếp cổng</string>
+    <string name="title_protocol">Giao thức</string>
+    <string name="title_dport">Cổng nguồn</string>
+    <string name="title_raddr">Địa chỉ đích</string>
+    <string name="title_rport">Cổng đích</string>
+    <string name="title_ruid">Ứng dụng đích</string>
+    <string name="title_external">Đối với một máy chủ ngoài chọn \'nobody\'</string>
+    <string name="title_unmetered_allowed">Lưu lượng không trả phí được cho phép</string>
+    <string name="title_unmetered_blocked">Lưu lượng không trả phí bị chặn</string>
+    <string name="title_unmetered_disabled">Các quy tắc không trả phí không được áp dụng</string>
+    <string name="title_metered_allowed">Lưu lượng có trả phí được cho phép</string>
+    <string name="title_metered_blocked">Lưu lượng có trả phí bị chặn</string>
+    <string name="title_metered_disabled">Các quy tắc có trả phí không được áp dụng</string>
+    <string name="title_host_allowed">Địa chỉ được cho phép</string>
+    <string name="title_host_blocked">Địa chỉ bị chặn</string>
+    <string name="title_interactive_allowed">Cho phép khi màn hình bật</string>
+    <string name="title_roaming_blocked">Chặn khi chuyển vùng</string>
+    <string name="title_metered">Theo mặc định, kết nối Wi-Fi được coi là không trả phí và kết nối di động được coi là có trả phí</string>
+    <string name="title_rate">Đánh giá</string>
+    <string name="title_allow">Cho phép</string>
+    <string name="title_block">Chặn</string>
+    <string name="title_nobody">nobody</string>
+    <string name="title_log_whois">Whois %1$s</string>
+    <string name="title_log_port">Cổng %1$d</string>
+    <string name="title_log_copy">Sao chép</string>
+    <!-- App Overview -->
+    <string name="tracked_app_icon">Tắt quyền truy cập internet cho ứng dụng này</string>
+    <string name="tracked_app_name">Tên ứng dụng</string>
+    <!-- Dynamic content descriptions for the app-icon Internet toggle in the app list (issue #231) -->
+    <string name="toggle_block_internet_description">Chặn truy cập Internet cho %1$s</string>
+    <string name="toggle_allow_internet_description">Cho phép truy cập Internet cho %1$s</string>
+    <string name="toggle_no_internet_description">%1$s không có quyền truy cập Internet</string>
+    <string name="toggle_internet_unavailable_description">Không thể kiểm soát truy cập Internet cho %1$s</string>
+    <!-- Dynamic content description for the per-category tracker-blocking switch -->
+    <string name="toggle_block_category_description">Chặn trình theo dõi trong danh mục %1$s</string>
+    <!-- Dynamic content description for the home-screen widget toggle (accessibility follow-up, issue #636) -->
+    <string name="widget_toggle_enable_description">Bật tính năng chặn trình theo dõi</string>
+    <string name="widget_toggle_disable_description">Tắt tính năng chặn trình theo dõi</string>
+    <string name="accessibility_tracker_blocking_enabled">Đã bật tính năng chặn trình theo dõi</string>
+    <string name="accessibility_tracker_blocking_disabled">Đã tắt tính năng chặn trình theo dõi</string>
+    <plurals name="n_companies_found_week">
+        <item quantity="other">đã liên hệ với %d công ty trong tuần trước</item>
+    </plurals>
+    <plurals name="n_companies_found">
+        <item quantity="other">đã liên hệ với %d công ty trong tất cả thời gian</item>
+    </plurals>
+    <string name="confirm_ipinfo_title">Lấy thông tin tổ chức?</string>
+    <string name="confirm_ipinfo">Việc này sẽ liên hệ với dịch vụ ngoài ipinfo.io, và chia sẻ dữ liệu về các địa chỉ IP đã liên hệ với họ.</string>
+    <string name="external_servers">Tự động lấy email của nhà phát triển?</string>
+    <string name="confirm_google_info">Ứng dụng này có thể tự động lấy email của nhà phát triển ứng dụng từ CH Play cho bạn.</string>
+    <string name="ok">OK</string>
+    <string name="yes">Có</string>
+    <string name="no">Không</string>
+    <string name="menu_csv">Xuất dưới dạng CSV</string>
+    <string name="exporting">Đang xuất..</string>
+    <string name="export_failed">Xuất thất bại</string>
+    <string name="exported">Đã xuất ra bộ nhớ!</string>
+    <!-- App Details -->
+    <string name="title_activity_detail">Chi tiết</string>
+    <string name="tab_trackers">Trình theo dõi</string>
+    <string name="tab_countries">Quốc gia</string>
+    <string name="tab_actions">Quyền dữ liệu</string>
+    <string name="app_info">Quản lý ứng dụng</string>
+    <!-- Actions -->
+    <string name="block_tracking">Chặn trình theo dõi</string>
+    <string name="block_tracking_description">Nhiều ứng dụng gửi dữ liệu đến các bên thứ ba, được gọi là trình theo dõi. TrackerControl cho phép bạn chặn các lượt truyền mạng đó một cách có chọn lọc. Tuy nhiên, hãy sử dụng việc này một cách khôn ngoan, vì các nhà phát triển dựa vào các dịch vụ đó, đáng chú ý nhất là quảng cáo.</string>
+    <string name="personalised_ads">Giới hạn việc cá nhân hoá</string>
+    <string name="personalised_ads_description">Android cho phép bạn giới hạn quyền truy cập của các ứng dụng vào ID quảng cáo của Google của thiết bị. Tuy nhiên, các ứng dụng có thể bỏ qua cài đặt này, và vẫn sử dụng ID này. Chúng cũng có thể tiếp tục thu thập ID này để nhằm mục đích phân tích, theo như chính sách của Google. Bạn cần có sự tin cậy vào Google và công ty thu thập dữ liệu đó.</string>
+    <string name="data_managment">Quản lý dữ liệu</string>
+    <string name="data_management_description">Quy định chung về bảo vệ dữ liệu của Liên minh Châu Âu (GDPR) cho phép những người dùng ở Liên minh châu Âu quản lý bất kỳ dữ liệu nào liên quan đến họ. Ứng dụng này cung cấp các mẫu email để liên hệ với nhà phát triển. Nhà phát triển đó phải trả lời trong vòng một tháng.</string>
+    <string name="contacts">Liên hệ </string>
+    <string name="contacts_description">Nếu bạn nghĩ là một ứng dụng vi phạm các nguyên tắc bảo vệ dữ liệu, bạn có thể sẽ muốn liên hệ trực tiếp với những người có trách nhiệm.</string>
+    <string name="play_services_required">Đây là cài đặt của Google Play Services, nhưng dịch vụ này không có trên thiết bị của bạn.</string>
+    <string name="no_mail_service">Hãy cài đặt một ứng dụng email khách.</string>
+    <string name="ad_settings">Thay đổi ngay</string>
+    <string name="request_data">Yêu cầu dữ liệu</string>
+    <string name="request_deletion">Yêu cầu xoá</string>
+    <string name="contact_developer">Nhà phát triển</string>
+    <string name="contact_playstore">Google</string>
+    <string name="contact_officials">Các quan chức của EU</string>
+    <string name="google_dpo_mail">data-protection-office@google.com</string>
+    <string name="dpas_overview_url">https://edpb.europa.eu/about-edpb/board/members</string>
+    <string name="subject_request_data">Yêu cầu truy cập dữ liệu theo GDPR</string>
+    <string name="body_request_data"><![CDATA[Yêu cầu tới bên có liên quan:\n
+\n
+\n
+Tôi yêu cầu bạn, với tư cách là bên kiểm soát dữ liệu của ứng dụng Android %1$s (ID: %2$s), xác nhận liệu bạn có đang xử lý dữ liệu cá nhân nào về tôi hay không.\n
+Nếu có, vui lòng cung cấp cho tôi mọi thông tin cần thiết được quy định tại Điều 15 của Quy định chung về bảo vệ dữ liệu (GDPR) của Liên minh Châu Âu, bao gồm:\n
+\n
+• bản sao dữ liệu cá nhân của tôi;\n
+• mục đích xử lý;\n
+• các loại dữ liệu cá nhân liên quan;\n
+• những người nhận mà bạn tiết lộ dữ liệu cá nhân của tôi và các biện pháp bảo vệ bạn cung cấp;\n
+• thời hạn lưu trữ dữ liệu cá nhân của tôi hoặc tiêu chí dùng để xác định thời hạn này;\n
+• thông tin về nguồn dữ liệu cá nhân của tôi; và\n
+• việc có ra quyết định tự động (bao gồm lập hồ sơ) hay không, và nếu có:\n
+    - logic liên quan trong quá trình ra quyết định;\n
+    - tầm quan trọng và hậu quả dự kiến đối với tôi;\n
+    - các bước bạn đã thực hiện để ngăn lỗi, thiên vị và phân biệt đối xử; và\n
+    - giải thích cách tôi có thể trình bày quan điểm và phản đối một quyết định.\n
+\n
+Yêu cầu này liên quan đến mọi hoạt động xử lý dữ liệu cá nhân của tôi do bạn thực hiện, bao gồm cả mọi bên xử lý dữ liệu cá nhân thay mặt bạn.\n
+\n
+Vui lòng gửi phản hồi của bạn bằng email qua phương thức an toàn. Tôi mong nhận được phản hồi trong vòng một tháng kể từ khi bạn nhận được yêu cầu của tôi.\n
+\n
+Trân trọng,\n\n]]></string>
+    <string name="body_delete_data"><![CDATA[Yêu cầu tới bên có liên quan:\n
+\n
+\n
+Tôi thực hiện quyền xoá dữ liệu của mình như được quy định tại Điều 17 của Quy định chung về bảo vệ dữ liệu (GDPR) của Liên minh Châu Âu. Tôi yêu cầu bạn, với tư cách là bên kiểm soát dữ liệu của ứng dụng Android %1$s (ID: %2$s), xoá không chậm trễ những dữ liệu cá nhân sau đây mà bạn đang xử lý về tôi:\n
+• Mọi dữ liệu.\n
+\n
+Lý do tôi yêu cầu xoá là tôi rút lại hoặc đã rút lại sự đồng ý cho việc xử lý dữ liệu cá nhân. Yêu cầu này liên quan đến mọi hoạt động xử lý dữ liệu cá nhân của tôi do bạn thực hiện, bao gồm cả mọi bên xử lý dữ liệu cá nhân thay mặt bạn.\n
+\n
+Vui lòng gửi phản hồi của bạn bằng email qua phương thức an toàn. Tôi mong nhận được phản hồi trong vòng một tháng kể từ khi bạn nhận được yêu cầu của tôi.\n
+\n
+Trân trọng,\n\n]]></string>
+    <string name="crash_dialog_text">Xin lỗi. TrackerControl vừa mới bị văng ra.. Bạn có muốn gửi email có các chi tiết cho chúng tôi không?</string>
+    <string name="crash_dialog_comment">Có bình luận gì không?</string>
+    <string name="instructions_monitoring_private_dns">Gạt công tắc và tương tác với một số ứng dụng. DNS riêng phải được tắt.</string>
+    <string name="instructions_monitoring">Gạt công tắc và tương tác với một số ứng dụng.</string>
+    <string name="device_not_supported_title">Thiết bị không được hỗ trợ</string>
+    <string name="device_not_supported_msg">Hệ điều hành của thiết bị không cho phép việc giám sát và lọc các sự giao tiếp mạng. Điều này là bắt buộc cho TrackerControl.</string>
+    <string name="launch_app">Chạy &amp; tìm trình theo dõi</string>
+    <string name="launch_app_failed">Không thể khởi chạy ứng dụng này</string>
+    <string name="countries">Các quốc gia đích</string>
+    <string name="countries_explanation">Tìm ra nơi mà điện thoại của bạn gửi dữ liệu theo dõi đến.\n\nThông tin được dựa trên tra cứu DNS và thông tin IP, và có thể không chính xác.</string>
+    <string name="countries_loading_failed">Ối… Tải bản đồ quốc gia thất bại. Vui lòng nói cho tc@kollnig.net làm thế nào mà việc này xảy ra.</string>
+    <string name="countries_map_highlighted">Đã tô sáng các điểm đến theo dõi: %1$s</string>
+    <string name="countries_map_none">Không có điểm đến theo dõi nào được tô sáng.</string>
+    <string name="tracker_advertising">Quảng cáo</string>
+    <string name="tracker_analytics">Phân tích</string>
+    <string name="tracker_content">Thiết yếu</string>
+    <string name="tracker_cryptomining">Đào tiền ảo</string>
+    <string name="tracker_fingerprinting">Nhận dạng</string>
+    <string name="tracker_social">Xã hội</string>
+    <string name="tracker_consent">Quản lý sự đồng ý</string>
+    <string name="tracker_uncategorised">Chưa phân loại</string>
+    <string name="setting_blocking_mode">Chế độ chặn</string>
+    <string name="summary_blocking_mode_minimal">Tối thiểu: Chỉ chặn các trình theo dõi trong danh sách DuckDuckGo an toàn để chặn. Trình duyệt vẫn được định tuyến qua VPN, nhưng tính năng bảo vệ trình theo dõi mặc định tắt. Loại trừ các ứng dụng đã biết là không tương thích. Ít làm hỏng ứng dụng.</string>
+    <string name="summary_blocking_mode_standard">Tiêu chuẩn: Chặn mọi trình theo dõi đã biết trong nhiều danh sách (X-Ray, Disconnect, DuckDuckGo). Cho phép các dịch vụ thiết yếu. Nếu ứng dụng ngừng hoạt động, hãy điều chỉnh cài đặt Bảo vệ (xem Xử lý sự cố trong trình đơn ứng dụng).</string>
+    <string name="summary_blocking_mode_strict">Nghiêm ngặt: Chặn mọi trình theo dõi đã biết, bao gồm cả dịch vụ thiết yếu và miền IP dùng chung không rõ ràng. Nhiều ứng dụng sẽ cần cài đặt Bảo vệ ít hạn chế hơn (xem Xử lý sự cố trong trình đơn ứng dụng).</string>
+    <string name="summary_sni_wg_note">Lưu ý: Trích xuất SNI không áp dụng cho lưu lượng được định tuyến qua VPN từ xa.</string>
+    <string name="blocking_mode_minimal">Tối thiểu</string>
+    <string name="blocking_mode_standard">Tiêu chuẩn</string>
+    <string name="blocking_mode_strict">Nghiêm ngặt</string>
+    <string name="onboarding_blockingmode_title">Chọn chế độ chặn</string>
+    <string name="onboarding_blockingmode_desc">Chọn cách TrackerControl xử lý trình theo dõi. Các chế độ chặn dừng trình theo dõi với mức độ mạnh khác nhau; chế độ Nghiên cứu tắt việc chặn và chỉ bật trích xuất SNI để đo lường. Bạn có thể thay đổi lựa chọn này sau trong Cài đặt.</string>
+    <string name="onboarding_blockingmode_minimal_label">Tối thiểu (Đề xuất cho người dùng mới)</string>
+    <string name="onboarding_blockingmode_minimal_desc">Chỉ chặn các trình theo dõi đã xác nhận và an toàn để chặn. Ít làm hỏng ứng dụng. Phù hợp với hầu hết người dùng.</string>
+    <string name="onboarding_blockingmode_standard_label">Tiêu chuẩn</string>
+    <string name="onboarding_blockingmode_standard_desc">Chặn mọi trình theo dõi đã biết từ nhiều danh sách. Một số ứng dụng có thể cần cài đặt Bảo vệ ít hạn chế hơn.</string>
+    <string name="onboarding_blockingmode_strict_label">Nghiêm ngặt</string>
+    <string name="onboarding_blockingmode_strict_desc">Chặn mọi thứ, bao gồm cả dịch vụ thiết yếu và các miền không rõ ràng. Ứng dụng có thể hỏng đáng kể — nhiều ứng dụng sẽ cần cài đặt Bảo vệ ít hạn chế hơn.</string>
+    <string name="onboarding_blockingmode_research_label">Nghiên cứu</string>
+    <string name="onboarding_blockingmode_research_desc">Không chặn trình theo dõi. Ghi các lần truyền vào ADB và bật trích xuất SNI để phát hiện tên máy chủ tốt hơn. Chỉ dành cho nghiên cứu: việc này làm lộ địa chỉ IP của bạn cho máy chủ trình theo dõi.</string>
+    <!-- Per-app remote VPN routing -->
+    <string name="setting_wg_route_mode">Định tuyến qua VPN từ xa</string>
+    <string name="summary_wg_route_mode">Những ứng dụng nào được chuyển tiếp qua VPN từ xa. Các ứng dụng còn lại vẫn được giám sát và chặn đầy đủ — chúng chỉ kết nối từ mạng của chính thiết bị này.</string>
+    <string name="wg_route_mode_all">Mọi ứng dụng</string>
+    <string name="wg_route_mode_selected">Chỉ ứng dụng đã chọn</string>
+    <string name="app_route_through">Qua VPN từ xa</string>
+    <string name="app_route_through_explanation">Ứng dụng này kết nối qua VPN từ xa của bạn, và VPN thấy lưu lượng của nó thay vì mạng của bạn.</string>
+    <string name="app_route_direct">Trực tiếp từ thiết bị này</string>
+    <string name="app_route_direct_explanation">Ứng dụng này kết nối từ mạng của bạn. Việc giám sát và chặn trình theo dõi vẫn được áp dụng. Truy vấn DNS của nó đi tới bộ phân giải của mạng bạn thay vì của VPN, và nó thấy địa chỉ thật của thiết bị — một số ứng dụng cần điều đó, ví dụ để truy cập thiết bị nội bộ hoặc kiểm tra captive portal.</string>
+    <string name="app_route_unavailable_no_vpn">Chưa thiết lập VPN từ xa nào, nên toàn bộ lưu lượng vốn đã rời thiết bị này trực tiếp.</string>
+    <string name="app_route_unavailable_bypassed">Ứng dụng này bỏ qua hoàn toàn TrackerControl, nên không có lưu lượng để định tuyến.</string>
+    <string name="app_route_unavailable_partial_routes">VPN từ xa của bạn không mang toàn bộ lưu lượng (AllowedIPs của nó không phải đường hầm đầy đủ). Định tuyến theo ứng dụng cần đường hầm đầy đủ, vì các tuyến được mọi ứng dụng dùng chung.</string>
+    <!-- Per-app protection state -->
+    <string name="app_state_heading">Chế độ chặn</string>
+    <string name="app_state_title_minimal">Chặn tối thiểu</string>
+    <string name="app_state_title_standard">Chặn tiêu chuẩn</string>
+    <string name="app_state_title_strict">Chặn nghiêm ngặt</string>
+    <string name="app_state_subtitle_misbehaving">Ứng dụng hoạt động không đúng? Chuyển sang Chặn tối thiểu tại đây.</string>
+    <string name="app_state_protected">Được bảo vệ</string>
+    <string name="app_state_protected_explanation">Trình theo dõi bị chặn và được ghi lại cho ứng dụng này.</string>
+    <string name="app_state_essential_only">Chỉ chặn tối thiểu</string>
+    <string name="app_state_essential_only_explanation">Chỉ chặn các trình theo dõi đã xác nhận mà chế độ Tối thiểu chặn. Các trình theo dõi khác vẫn được ghi lại nhưng được cho phép. Dùng tuỳ chọn này nếu tính năng chặn tiêu chuẩn làm ứng dụng hỏng.</string>
+    <string name="app_state_trackers_allowed">Cho phép trình theo dõi</string>
+    <string name="app_state_trackers_allowed_explanation">Ứng dụng vẫn đi qua TrackerControl, nhưng các trình theo dõi của nó không bị chặn và cũng không được ghi lại. Hãy dùng tuỳ chọn này nếu việc chặn làm hỏng ứng dụng.</string>
+    <string name="app_state_no_internet">Không có Internet</string>
+    <string name="app_state_no_internet_explanation">Mọi kết nối của ứng dụng này đều bị chặn. Bạn cũng có thể chạm vào biểu tượng ứng dụng ở màn hình chính.</string>
+    <string name="app_state_no_internet_shared_uid">Cũng áp dụng cho %1$s, ứng dụng dùng chung ID người dùng Android với ứng dụng này.</string>
+    <string name="app_state_bypassed">Bỏ qua TrackerControl</string>
+    <string name="app_state_bypassed_explanation">Ứng dụng kết nối trực tiếp, bên ngoài TrackerControl. Không có gì được giám sát hay chặn cho nó. Hãy dùng tuỳ chọn này như biện pháp cuối cùng nếu ứng dụng vẫn không hoạt động.\n\nLưu ý: \"Chặn kết nối khi không có VPN\" trong cài đặt VPN của Android phải được TẮT thì tuỳ chọn này mới hoạt động.</string>
+    <!-- Per-app protection screen -->
+    <string name="protection_title">Bảo vệ</string>
+    <string name="protection_route_heading">VPN từ xa</string>
+    <!-- Protection state and remote-VPN routing shown together on one row -->
+    <string name="protection_app_not_working">Ứng dụng không hoạt động? Nhấn vào đây</string>
+    <plurals name="protection_paused_resumes">
+        <item quantity="other">Đã tạm dừng — tiếp tục sau %d phút</item>
+    </plurals>
+    <string name="protection_resume">Tiếp tục ngay</string>
+    <string name="protection_pause_shared_uid">Tạm dừng ứng dụng này cũng tạm dừng %1$s vì chúng dùng chung ID người dùng Android.</string>
+    <string name="protection_pause_lockdown_warning">Khoá mạng Android đang bật. Tạm dừng ứng dụng này sẽ chặn các kết nối của ứng dụng cho đến khi tính năng bảo vệ tiếp tục.</string>
+    <string name="protection_lockdown_note">Android không cung cấp trạng thái khoá mạng ở đây. Nếu bật \"Chặn kết nối khi không có VPN\", ứng dụng bị tạm dừng có thể mất quyền truy cập mạng.</string>
+    <string name="protection_blocked_last_24h">Đã chặn trong 24 giờ qua</string>
+    <string name="protection_no_blocked_trackers">Gần đây không có gì bị chặn — có lẽ không phải TrackerControl.</string>
+    <string name="protection_recording_unavailable">Không thể ghi hoạt động trình theo dõi vì \"Tìm trình theo dõi mới\" đang tắt.</string>
+    <string name="protection_temporary">Tạm thời, trong khi tạm dừng</string>
+    <string name="uninstall">Gỡ cài đặt</string>
+    <string name="settings_uninstall">Cài đặt của ứng dụng &amp; Gỡ cài đặt</string>
+    <string name="no_trackers_found_message_disabled">Bật công tắc trong màn hình chính, sau đó chạy ứng dụng để tìm trình theo dõi</string>
+    <string name="no_trackers_found_message">Chạy ứng dụng để tìm trình theo dõi</string>
+    <string name="no_trackers_found_action">Chạy</string>
+    <string name="no_internet_message">"Ứng dụng này không truy cập Internet. Nó có thể sẽ vẫn theo dõi bạn bằng cách trao đổi dữ liệu với các ứng dụng khác."</string>
+    <string name="no_internet">Không có truy cập Internet</string>
+    <string name="bypass_vpn_error">"Không thể chặn Internet khi ứng dụng bỏ qua TrackerControl."</string>
+    <string name="back">Quay lại</string>
+    <string name="forever_free">Miễn phí mãi mãi</string>
+    <string name="your_privacy">Sự riêng tư của bạn</string>
+    <string name="tracker_hostlist">Các máy chủ được người dùng đặt</string>
+    <string name="internet_blocked">Đã chặn quyền truy cập internet</string>
+    <string name="internet_unblocked">Đã bỏ chặn quyền truy cập internet</string>
+    <string name="category_unblocked">Đã cho phép các trình theo dõi trong thể loại</string>
+    <string name="category_unblocked_warning">Đã cho phép với danh mục này — chặn danh mục để thay đổi từng công ty.</string>
+    <string name="tracking_detection_failed">Phát hiện thư viện trình theo dõi thất bại.</string>
+    <string name="tracking_detection_failed_ram">Phát hiện thư viện trình theo dõi thất bại. Không đủ RAM.</string>
+    <string name="tracking_detection_failed_report">Phát hiện thư viện trình theo dõi thất bại. Vui lòng báo cáo vấn đề này đến nhà phát triển.</string>
+    <string name="detected_trackers">Đã phát hiện thư viện trình theo dõi: %s</string>
+    <string name="analyzing_classes_progress">Đang phân tích các lớp… %d%%</string>
+    <string name="none">Không có</string>
+    <string name="trackers_static_explanation">TrackerControl phát hiện việc theo dõi trong mã (\'các thư viện\') và lưu lượng mạng của các ứng dụng.\n\nViệc theo dõi được phát hiện trong lưu lượng mạng có thể được TrackerControl chặn.</string>
+    <string name="trackers_static_explanation_playstore">TrackerControl phát hiện việc theo dõi trong mã (\'thư viện\') và lưu lượng mạng của các ứng dụng.</string>
+    <string name="trackers_static_disclaimer">Lưu ý: Phát hiện mã thư viện trình theo dõi không có nghĩa là thư viện đang được sử dụng. Một số ứng dụng có thể đã xoá hoặc tắt các thư viện này, nhưng vẫn có thể phát hiện dấu vết.</string>
+    <string name="analyze_tracker_libraries">Phân tích thư viện trình theo dõi</string>
+    <string name="update_analysis">Cập nhật phân tích</string>
+    <string name="analysis_outdated_version">\n\nLưu ý: Phân tích thuộc về phiên bản ứng dụng trước. Các thư viện theo dõi tích hợp có thể đã thay đổi.</string>
+    <!-- Tracker library screen, reached from the summary row on the Trackers tab -->
+    <string name="libraries_title">Thư viện trình theo dõi</string>
+    <string name="libraries_row_heading">Thư viện trình theo dõi</string>
+    <string name="libraries_none_found">Không tìm thấy thư viện trình theo dõi trong mã ứng dụng</string>
+    <string name="libraries_not_analysed">Chưa phân tích</string>
+    <string name="libraries_analysing">Đang phân tích mã ứng dụng…</string>
+    <string name="libraries_analysis_failed">Phân tích thất bại — nhấn để thử lại</string>
+    <string name="libraries_outdated_suffix">%1$s (phiên bản ứng dụng trước)</string>
+    <string name="detected_tracker_libraries_heading">Đã phát hiện trong mã ứng dụng</string>
+    <string name="tracker_libraries_source">Các trang web từ dữ liệu trình theo dõi của Exodus Privacy</string>
+    <string name="open_tracker_website">Mở trang web %1$s</string>
+    <plurals name="libraries_found">
+        <item quantity="other">Tìm thấy %d thư viện trình theo dõi trong mã ứng dụng</item>
+    </plurals>
+    <string name="analysis_queued">Đã xếp hàng chờ phân tích…</string>
+    <string name="blocked">ĐÃ CHẶN</string>
+    <string name="allowed">ĐÃ CHO PHÉP</string>
+    <string name="allowed_shared_ip">Đã cho phép — IP dùng chung; bật chế độ Nghiêm ngặt để chặn</string>
+    <string name="tracker_monitored_minimal">Đang giám sát — không bị chặn ở chế độ Tối thiểu</string>
+    <string name="setting_domain_based_blocked">Chặn dựa trên miền</string>
+    <string name="summary_domain_based_blocking">Cho phép chặn một cách chi tiết hơn. Vẫn đang được phát triển.</string>
+    <string name="uncertain_entry">Các mục có dấu \'*\' có thể không chính xác do giới hạn của Android. Việc này thường có nghĩa là một công ty sử dụng cùng một địa chỉ IP dưới nhiều miền khác nhau, nhưng cũng có thể có nghĩa là nhiều công ty khác nhau đứng sau cùng một địa chỉ IP (vd: nếu họ sử dụng Content Delivery Network).</string>
+    <string name="browsers_not_supported">Đã phát hiện trình duyệt ⚠️</string>
+    <string name="browsers_not_supported_explanation">Có vẻ đây là ứng dụng trình duyệt.\n\nTính năng bảo vệ theo dõi của trình duyệt hoạt động tốt nhất bên trong trình duyệt, nơi trình theo dõi có thể bị chặn ở cấp trang và yêu cầu. TrackerControl giữ lưu lượng trình duyệt được định tuyến qua đường hầm VPN/WireGuard, nhưng tính năng chặn trình theo dõi ở cấp ứng dụng mặc định tắt và có thể làm trang web hỏng nếu bật.</string>
+    <string name="msg_notifications">Nhấn để cấp quyền thông báo (cho thông báo lỗi, v.v.)</string>
+    <string name="msg_local_network">Nhấn để cho phép truy cập mạng cục bộ, quyền mà Android gọi là \"thiết bị ở gần\". Android 17 mặc định chặn quyền này, nên không thể truy cập máy chủ DNS, bộ phân giải DNS bảo mật, máy ngang hàng WireGuard hoặc proxy của bạn.</string>
+    <string name="msg_local_network_title">Cần truy cập mạng cục bộ</string>
+    <string name="msg_local_network_notify">TrackerControl không thể truy cập máy chủ DNS, bộ phân giải DNS bảo mật, máy ngang hàng WireGuard hoặc proxy của bạn, nên việc phân giải tên có thể thất bại. Android 17 yêu cầu quyền này và gọi đó là \"thiết bị ở gần\". Nhấn để mở TrackerControl và cho phép quyền.</string>
+    <string name="msg_private_dns_title">DNS riêng chặn phân giải tên</string>
+    <string name="msg_private_dns_notify">\"DNS riêng\" của Android được đặt thành %1$s và TrackerControl chặn DNS mã hoá để phát hiện trình theo dõi. Android không chuyển sang DNS thông thường ở chế độ này, nên sẽ không có gì tải được. Nhấn để đặt DNS riêng thành \"Tự động\" hoặc \"Tắt\" — TrackerControl cung cấp DNS bảo mật riêng trong Cài đặt.</string>
+    <string name="msg_private_dns_unknown_resolver">một bộ phân giải tuỳ chỉnh</string>
+    <string name="msg_private_dns_row">Sẽ không có gì tải được: \"DNS riêng\" của Android được đặt thành một bộ phân giải cụ thể và TrackerControl chặn DNS mã hoá để phát hiện trình theo dõi. Nhấn để đặt DNS riêng thành \"Tự động\" hoặc \"Tắt\" — TrackerControl cung cấp DNS bảo mật riêng trong Cài đặt.</string>
+    <string name="msg_private_dns_bypass_title">DNS riêng bỏ qua việc phát hiện trình theo dõi</string>
+    <string name="msg_private_dns_bypass_notify">Đã tắt phát hiện trình theo dõi: DNS được mã hoá đến %1$s nên không thể phân tích các kết nối của ứng dụng</string>
+    <string name="msg_private_dns_bypass_allowed_notify">Một số ứng dụng đang dùng DNS mã hoá; TrackerControl không nhìn thấy các liên hệ với trình theo dõi của chúng.</string>
+    <string name="setting_monitor_system">Giám sát ứng dụng hệ thống</string>
+    <string name="summary_monitor_system">Định tuyến ứng dụng hệ thống (Play Services, dịch vụ nhà mạng, v.v.) qua VPN để phát hiện và chặn trình theo dõi của chúng, đồng thời hiện chúng trong danh sách ứng dụng.\n\nMặc định tắt: loại trừ ứng dụng hệ thống thân thiện với pin hơn vì lưu lượng nền của chúng không còn đánh thức VPN. Bật tuỳ chọn này xung đột với \"Chặn kết nối khi không có VPN\" trong cài đặt VPN Android, tuỳ chọn này phải được TẮT.</string>
+    <!-- Onboarding -->
+    <string name="title_next">Tiếp theo</string>
+    <string name="title_previous">Trước</string>
+    <string name="title_finish">Bắt đầu</string>
+    <string name="onboarding_welcome_title">Làm chủ quyền riêng tư của bạn</string>
+    <string name="onboarding_welcome_desc">TrackerControl là dự án nghiên cứu do cộng đồng thúc đẩy, trao cho bạn khả năng:\n\n• <b>Giám sát</b> việc thu thập dữ liệu ẩn của ứng dụng di động theo thời gian thực.\n• <b>Chặn</b> trình theo dõi và quảng cáo bằng cơ sở dữ liệu gồm <b>2.000.000 ứng dụng đã phân tích</b>.\n• <b>Nhận diện</b> các công ty và quốc gia đích nhận dữ liệu của bạn.\n\nMọi phân tích đều diễn ra <b>cục bộ trên thiết bị của bạn</b> – lưu lượng của bạn không bao giờ rời khỏi quyền kiểm soát của bạn.</string>
+    <string name="onboarding_vpn_title">Bật tính năng bảo vệ</string>
+    <string name="onboarding_vpn_desc">TrackerControl dùng giao diện VPN cục bộ của Android để phân tích lưu lượng Internet của bạn.\n\n<b>Quan trọng:</b> Không có máy chủ VPN bên ngoài nào tham gia. Chúng tôi không nhìn thấy dữ liệu của bạn.</string>
+    <string name="onboarding_vpn_action">Bật VPN trên thiết bị</string>
+    <string name="onboarding_vpn_sure">TrackerControl không thể lọc lưu lượng nếu không có VPN cục bộ. Bạn có chắc muốn tiếp tục mà không bật VPN không?</string>
+    <string name="onboarding_vpn_blocked_title">Một VPN khác đang hoạt động</string>
+    <string name="onboarding_vpn_blocked_desc">Android không cho TrackerControl khởi động VPN cục bộ vì một ứng dụng khác đang được đặt làm <b>VPN luôn bật</b>. Mở cài đặt VPN và tắt VPN luôn bật cho VPN kia, rồi thử lại.</string>
+    <string name="onboarding_vpn_blocked_action">Mở cài đặt VPN</string>
+    <string name="onboarding_notify_title">Luôn cập nhật</string>
+    <string name="onboarding_notify_desc">Cho phép thông báo để xem cập nhật theo thời gian thực và điều khiển tính năng bảo vệ trực tiếp từ thanh trạng thái.</string>
+    <string name="onboarding_notify_action">Cho phép thông báo</string>
+    <string name="onboarding_notify_sure">Nếu không cấp quyền thông báo, bạn sẽ không thể xem cập nhật theo thời gian thực hoặc điều khiển tính năng bảo vệ từ thanh trạng thái. Bạn có chắc không?</string>
+    <string name="onboarding_timeline_title">Xem Dòng thời gian lấp đầy</string>
+    <string name="onboarding_timeline_desc">TrackerControl khởi động ở Dòng thời gian. Ban đầu Dòng thời gian có thể trống: ứng dụng thường chỉ liên hệ trình theo dõi khi bạn sử dụng chúng.\n\nSau khi hoàn tất thiết lập, mở một vài ứng dụng rồi quay lại TrackerControl để xem hoạt động theo dõi đã phát hiện và chặn.</string>
+    <string name="onboarding_lockdown_title">Cài đặt khoá VPN</string>
+    <string name="onboarding_lockdown_desc">Android có cài đặt \"Chặn kết nối khi không có VPN\", ngăn ứng dụng kết nối trước khi TrackerControl sẵn sàng.\n\nNếu bật, cài đặt này có thể khiến ứng dụng không tải được. Chúng tôi khuyên bạn giữ cài đặt này ở trạng thái <b>tắt</b> để có trải nghiệm tốt nhất.</string>
+    <string name="onboarding_lockdown_action">Mở cài đặt VPN</string>
+    <string name="onboarding_lockdown_sure">Tiếp tục khi khoá mạng bật có thể gây vấn đề kết nối. Bạn có chắc không?</string>
+    <string name="onboarding_action_disabled">Đã tắt</string>
+    <string name="onboarding_action_granted">Đã cấp quyền</string>
+    <!-- Insights Screen -->
+    <string name="insights_title">Thông tin chi tiết về quyền riêng tư của bạn</string>
+    <string name="insights_subtitle_7days">7 ngày qua</string>
+    <string name="insights_tracking_attempts">Máy chủ trình theo dõi đã liên hệ</string>
+    <string name="insights_blocked">Đã chặn</string>
+    <string name="insights_allowed">Đã cho phép</string>
+    <string name="insights_tracker_companies">Công ty theo dõi</string>
+    <string name="insights_apps_with_trackers">Ứng dụng có trình theo dõi</string>
+    <string name="insights_pervasive_trackers">Trình theo dõi phổ biến nhất</string>
+    <string name="insights_top_domains">Miền trình theo dõi hàng đầu</string>
+    <!-- Joins the alternative domain names of one tracker, e.g. "example.com or example.net". Keep the surrounding spaces. -->
+    <string name="insights_domain_alias_separator">" hoặc "</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_in_apps" tools:ignore="PluralsCandidate">trong %d ứng dụng</string>
+    <plurals name="insights_apps_count">
+        <item quantity="other">trong %d ứng dụng</item>
+    </plurals>
+    <string name="insights_no_data">Chưa có dữ liệu theo dõi. Hãy dùng các ứng dụng rồi quay lại kiểm tra!</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_shocking_fact" tools:ignore="PluralsCandidate">Tuần này các ứng dụng của bạn đã liên hệ %1$d công ty theo dõi qua %2$d máy chủ trình theo dõi!</string>
+    <!-- Retained for Play Store copy; call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_share">Chia sẻ với bạn bè</string>
+    <string name="insights_share_trackers_blocked">Máy chủ trình theo dõi đã chặn</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_share_message" tools:ignore="PluralsCandidate">Tuần này tôi đã chặn %1$d máy chủ trình theo dõi từ %2$d công ty bằng TrackerControl! Lấy lại quyền riêng tư của bạn: https://trackercontrol.org</string>
+    <!-- Retained for Play Store copy; call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_see_more">Xem thêm →</string>
+    <!-- What's New onboarding slide (not translated) -->
+    <string name="title_blocklists">Danh sách chặn tùy chỉnh</string>
+    <string name="summary_manage_blocklists">Thêm danh sách chặn ở định dạng tệp hosts. Được dùng khi các danh sách trình theo dõi tích hợp không nhận diện được một tên miền.</string>
+    <string name="title_add_blocklist">Thêm danh sách chặn</string>
+    <string name="title_delete_blocklist">Xóa danh sách chặn</string>
+    <string name="msg_delete_blocklist_confirm">Bạn có chắc muốn xóa danh sách chặn này không?</string>
+    <string name="msg_invalid_url">URL không hợp lệ</string>
+    <string name="msg_apply_blocklists_failed">Không áp dụng được các danh sách chặn</string>
+    <string name="msg_last_update">Cập nhật gần nhất: %s</string>
+    <string name="blocklist_format">Nhập URL HTTPS của danh sách chặn định dạng hosts (ví dụ: 0.0.0.0 ads.example.com). Quy tắc lọc của trình duyệt không được hỗ trợ.</string>
+    <string name="blocklist_minimal_notice">Danh sách chặn tùy chỉnh không hoạt động ở chế độ Tối thiểu. Hãy chuyển sang Tiêu chuẩn hoặc Nghiêm ngặt trong Cài đặt để sử dụng.</string>
+    <string name="blocklist_research_notice">Danh sách chặn tùy chỉnh không hoạt động khi chế độ Nghiên cứu đang bật. Hãy tắt Nghiên cứu trong Cài đặt để bật tính năng chặn trình theo dõi.</string>
+    <string name="blocklist_browser_notice">Tính năng bảo vệ khỏi trình theo dõi cho trình duyệt được tắt theo mặc định. Hãy bật nó trên trang ứng dụng của trình duyệt để dùng danh sách chặn tùy chỉnh tại đó.</string>
+    <string name="blocklist_downloading">Đang tải xuống danh sách chặn… Sẽ chờ kết nối nếu đang ngoại tuyến.</string>
+    <string name="blocklist_not_downloaded">Chưa tải xuống</string>
+    <string name="blocklist_download_failed">Không thể tải xuống hoặc áp dụng các danh sách chặn. Hãy kiểm tra lỗi của danh sách và thử cập nhật lại.</string>
+    <string name="blocklist_update">Cập nhật danh sách chặn</string>
+    <!-- Accessibility labels -->
+    <string name="switch_tracker_control_description">Chặn trình theo dõi</string>
+    <string name="blocklist_delete_description">Xoá danh sách chặn</string>
+    <string name="blocklist_enable_description">Bật danh sách chặn %s</string>
+    <string name="log_connection_allowed">Đã cho phép</string>
+    <string name="log_connection_blocked">Đã chặn</string>
+    <string name="log_connection_other">Mạng khác</string>
+    <string name="log_screen_on">Màn hình bật</string>
+</resources>

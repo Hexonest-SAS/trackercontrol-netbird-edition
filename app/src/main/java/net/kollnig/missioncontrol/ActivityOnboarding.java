@@ -1,0 +1,708 @@
+package net.kollnig.missioncontrol;
+
+import android.Manifest;
+import android.annotation.SuppressLint;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.DialogInterface;
+import android.net.VpnService;
+import android.os.Build;
+import android.os.Bundle;
+import android.provider.Settings;
+import android.text.TextUtils;
+import android.util.Log;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
+import android.widget.TextView;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.preference.PreferenceManager;
+import androidx.recyclerview.widget.RecyclerView;
+import androidx.viewpager2.widget.ViewPager2;
+
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import eu.faircode.netguard.ActivityMain;
+import eu.faircode.netguard.ServiceSinkhole;
+import eu.faircode.netguard.Util;
+import net.kollnig.missioncontrol.data.BlockingMode;
+
+public class ActivityOnboarding extends AppCompatActivity {
+
+    /**
+     * Bump this to re-trigger onboarding for existing users.
+     * 1 = original onboarding (pre-2026 Q2)
+     * 2 = blocking modes, SNI privacy fix, performance improvements
+     */
+    public static final int ONBOARDING_VERSION = 2;
+
+    private ViewPager2 viewPager;
+    private Button btnNext;
+    private Button btnPrevious;
+    private List<Slide> slides = new ArrayList<>();
+    private OnboardingAdapter adapter;
+    private boolean slidesInitialized = false;
+
+    /**
+     * Adds the bottom system-bar (navigation bar) inset to a view's existing
+     * bottom margin, so it isn't clipped on edge-to-edge displays.
+     */
+    private void addBottomInsetMargin(View v) {
+        ViewGroup.MarginLayoutParams initialParams = (ViewGroup.MarginLayoutParams) v.getLayoutParams();
+        final int initialBottomMargin = initialParams.bottomMargin;
+        ViewCompat.setOnApplyWindowInsetsListener(v, (view, insets) -> {
+            Insets sysBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) view.getLayoutParams();
+            params.bottomMargin = initialBottomMargin + sysBars.bottom;
+            view.setLayoutParams(params);
+            return insets;
+        });
+    }
+
+    private boolean isLockdownEnabled() {
+        try {
+            int lockdown = Settings.Secure.getInt(getContentResolver(), "always_on_vpn_lockdown", 0);
+            return lockdown != 0;
+        } catch (Throwable ex) {
+            return false;
+        }
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_onboarding);
+
+        viewPager = findViewById(R.id.viewPager);
+        btnNext = findViewById(R.id.btnNext);
+        btnPrevious = findViewById(R.id.btnPrevious);
+
+        // Consume the bottom system-bar inset as extra margin so the Next/
+        // Previous buttons aren't clipped by the gesture/navigation bar on
+        // edge-to-edge displays.
+        addBottomInsetMargin(btnNext);
+        addBottomInsetMargin(btnPrevious);
+
+        BlockingMode.enforcePlayStoreMode(this);
+        setupSlides();
+
+        btnNext.setOnClickListener(v -> {
+            if (viewPager.getCurrentItem() < adapter.getItemCount() - 1) {
+                int position = viewPager.getCurrentItem();
+                Slide currentSlide = slides.get(position);
+
+                Runnable next = () -> viewPager.setCurrentItem(position + 1);
+
+                if (currentSlide.warningResId != 0) {
+                    Util.areYouSure(this, currentSlide.warningResId, () -> next.run());
+                } else {
+                    next.run();
+                }
+            } else {
+                finishOnboarding();
+            }
+        });
+
+        btnPrevious.setOnClickListener(v -> {
+            if (viewPager.getCurrentItem() > 0) {
+                viewPager.setCurrentItem(viewPager.getCurrentItem() - 1);
+            }
+        });
+
+        viewPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+            @Override
+            public void onPageSelected(int position) {
+                updateButtons(position);
+            }
+        });
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        refreshSlides();
+    }
+
+    // Slide state is recomputed as a whole, so no exact changed range exists.
+    @SuppressLint("NotifyDataSetChanged")
+    private void setupSlides() {
+        if (slidesInitialized) {
+            return;
+        }
+
+        slides.clear();
+
+        // 1. Welcome
+        slides.add(new Slide(
+                R.string.onboarding_welcome_title,
+                getText(R.string.onboarding_welcome_title),
+                getText(R.string.onboarding_welcome_desc),
+                R.drawable.ic_rocket2,
+                null,
+                null));
+
+        // 1b. What's New (for returning users who haven't seen the latest onboarding)
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        int seenVersion = prefs.getInt("onboarding_version", 0);
+        if (seenVersion > 0 && seenVersion < ONBOARDING_VERSION) {
+            slides.add(new Slide(
+                    R.string.onboarding_whatsnew_title,
+                    getText(R.string.onboarding_whatsnew_title),
+                    getText(R.string.onboarding_whatsnew_desc),
+                    R.drawable.ic_rocket2,
+                    null,
+                    null));
+        }
+
+        // 2. Blocking Mode Selection
+        slides.add(new Slide(
+                R.string.onboarding_blockingmode_title,
+                getText(R.string.onboarding_blockingmode_title),
+                getText(R.string.onboarding_blockingmode_desc),
+                R.drawable.ic_rocket2,
+                null, 0, null, true));
+
+        // 3. VPN (Only if not already prepared)
+        boolean vpnPrepared = VpnService.prepare(this) == null;
+        if (!vpnPrepared) {
+            slides.add(new Slide(
+                    R.string.onboarding_vpn_title,
+                    getText(R.string.onboarding_vpn_title),
+                    getText(R.string.onboarding_vpn_desc),
+                    R.drawable.lockdown,
+                    getString(R.string.onboarding_vpn_action),
+                    R.string.onboarding_vpn_sure,
+                    null)); // Listener set in refreshSlides
+        }
+
+        // 3. VPN Lockdown Warning (Android P+)
+        // Always show this slide - we can only check lockdown status after VPN is
+        // enabled (and only on Q+),
+        // so we check it dynamically in refreshSlides() or just show the button on P
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            slides.add(new Slide(
+                    R.string.onboarding_lockdown_title,
+                    getText(R.string.onboarding_lockdown_title),
+                    getText(R.string.onboarding_lockdown_desc),
+                    R.drawable.lockdown,
+                    getString(R.string.onboarding_lockdown_action),
+                    R.string.onboarding_lockdown_sure,
+                    null)); // Listener set in refreshSlides
+        }
+
+        // 4. Notifications (Android 13+)
+        if (Build.VERSION.SDK_INT >= 33) {
+            boolean canNotify = Util.canNotify(this);
+            if (!canNotify) {
+                slides.add(new Slide(
+                        R.string.onboarding_notify_title,
+                        getText(R.string.onboarding_notify_title),
+                        getText(R.string.onboarding_notify_desc),
+                        R.drawable.twotone_notifications_24,
+                        getString(R.string.onboarding_notify_action),
+                        R.string.onboarding_notify_sure,
+                        null));
+            }
+        }
+
+        // 5. Battery Optimization - Disabled for now to simplify onboarding
+        // boolean batteryOptimized = Util.batteryOptimizing(this);
+        // if (batteryOptimized) {
+        // slides.add(new Slide(
+        // R.string.onboarding_battery_title,
+        // getText(R.string.onboarding_battery_title),
+        // getText(R.string.onboarding_battery_desc),
+        // R.drawable.ic_scan_code,
+        // getString(R.string.onboarding_battery_action),
+        // R.string.onboarding_battery_sure,
+        // null));
+        // }
+
+        // 6. Unrestricted Network - Disabled for now to simplify onboarding
+        // if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        // boolean dataSaving = Util.dataSaving(this);
+        // if (dataSaving) {
+        // slides.add(new Slide(
+        // R.string.onboarding_network_title,
+        // getText(R.string.onboarding_network_title),
+        // getText(R.string.onboarding_network_desc),
+        // R.drawable.wifi,
+        // getString(R.string.onboarding_network_action),
+        // R.string.onboarding_network_sure,
+        // null));
+        // }
+        // }
+
+        // 7. Private DNS - no longer asked about: DoT (port 853) is blocked by
+        // default, so Android falls back to plaintext DNS on its own.
+
+        // 8. Timeline
+        slides.add(new Slide(
+                R.string.onboarding_timeline_title,
+                getText(R.string.onboarding_timeline_title),
+                getText(R.string.onboarding_timeline_desc),
+                R.drawable.ic_history,
+                null,
+                null));
+
+        // 9. Secure DNS - Disabled for now to simplify onboarding
+        // final SharedPreferences prefsDns =
+        // PreferenceManager.getDefaultSharedPreferences(this);
+        // boolean dohEnabled = prefsDns.getBoolean("doh_enabled", false);
+        // if (!dohEnabled) {
+        // slides.add(new Slide(
+        // R.string.onboarding_dns_title,
+        // getText(R.string.onboarding_dns_title),
+        // getText(R.string.onboarding_dns_desc),
+        // R.drawable.lockdown,
+        // getString(R.string.onboarding_dns_action),
+        // null));
+        // }
+
+        slidesInitialized = true;
+
+        if (adapter == null) {
+            adapter = new OnboardingAdapter(slides);
+            viewPager.setAdapter(adapter);
+        } else {
+            adapter.notifyDataSetChanged();
+        }
+
+        updateButtons(viewPager.getCurrentItem());
+    }
+
+    // Refreshing onboarding recomputes every slide; the exact changed range is
+    // not available to this stateful pager adapter.
+    @SuppressLint("NotifyDataSetChanged")
+    private void refreshSlides() {
+        if (!slidesInitialized) {
+            setupSlides();
+            return;
+        }
+
+        for (Slide slide : slides) {
+            // 2. VPN
+            if (slide.titleResId == R.string.onboarding_vpn_title) {
+                boolean vpnPrepared = VpnService.prepare(this) == null;
+                slide.actionButtonText = vpnPrepared ? getString(R.string.onboarding_action_granted)
+                        : getString(R.string.onboarding_vpn_action);
+                slide.warningResId = vpnPrepared ? 0 : R.string.onboarding_vpn_sure;
+                if (vpnPrepared) {
+                    slide.actionListener = null;
+                } else {
+                    slide.actionListener = v -> {
+                        // Proactively detect another Always-on VPN on Android < S,
+                        // where the setting is still readable.
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                            try {
+                                String alwaysOn = Settings.Secure.getString(
+                                        getContentResolver(), "always_on_vpn_app");
+                                if (!TextUtils.isEmpty(alwaysOn)
+                                        && !getPackageName().equals(alwaysOn)) {
+                                    showAlwaysOnVpnBlockedDialog();
+                                    return;
+                                }
+                            } catch (Throwable ex) {
+                                Log.e("Onboarding", ex.toString());
+                            }
+                        }
+                        try {
+                            Intent intent = VpnService.prepare(ActivityOnboarding.this);
+                            if (intent != null) {
+                                startActivityForResult(intent, 0);
+                            }
+                        } catch (Throwable ex) {
+                            Log.e("Onboarding", ex.toString());
+                            showAlwaysOnVpnBlockedDialog();
+                        }
+                    };
+                }
+            }
+
+            // 4. Notifications
+            if (slide.titleResId == R.string.onboarding_notify_title) {
+                boolean canNotify = Util.canNotify(this);
+                slide.actionButtonText = canNotify ? getString(R.string.onboarding_action_granted)
+                        : getString(R.string.onboarding_notify_action);
+                slide.warningResId = canNotify ? 0 : R.string.onboarding_notify_sure;
+                if (canNotify) {
+                    slide.actionListener = null;
+                } else {
+                    slide.actionListener = v -> {
+                        ActivityCompat.requestPermissions(ActivityOnboarding.this,
+                                // API-gated request; the permission name is an inlined constant.
+                                //noinspection InlinedApi
+                                new String[] { Manifest.permission.POST_NOTIFICATIONS }, 1);
+                    };
+                }
+            }
+
+            // 5. Battery Optimization - Disabled for now
+            // if (slide.titleResId == R.string.onboarding_battery_title) {
+            // boolean batteryOptimized = Util.batteryOptimizing(this);
+            // slide.actionButtonText = batteryOptimized ?
+            // getString(R.string.onboarding_battery_action)
+            // : getString(R.string.onboarding_action_unrestricted);
+            // slide.warningResId = batteryOptimized ? R.string.onboarding_battery_sure : 0;
+            // slide.actionListener = v -> {
+            // if (batteryOptimized) {
+            // try {
+            // Intent intent = new
+            // Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            // .setData(Uri.parse("package:" + getPackageName()));
+            // startActivity(intent);
+            // } catch (Throwable ex) {
+            // startActivity(new
+            // Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            // }
+            // }
+            // };
+            // }
+
+            // 6. Unrestricted Network - Disabled for now
+            // if (slide.titleResId == R.string.onboarding_network_title) {
+            // boolean dataSaving = Util.dataSaving(this);
+            // slide.actionButtonText = dataSaving ?
+            // getString(R.string.onboarding_network_action)
+            // : getString(R.string.onboarding_action_unrestricted);
+            // slide.warningResId = dataSaving ? R.string.onboarding_network_sure : 0;
+            // slide.actionListener = v -> {
+            // if (dataSaving) {
+            // Intent intent = new
+            // Intent(Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS,
+            // Uri.parse("package:" + getPackageName()));
+            // if (intent.resolveActivity(getPackageManager()) != null) {
+            // startActivity(intent);
+            // }
+            // }
+            // };
+            // }
+
+            // Lockdown
+            if (slide.titleResId == R.string.onboarding_lockdown_title) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    boolean lockdownEnabled = isLockdownEnabled();
+                    slide.actionButtonText = lockdownEnabled ? getString(R.string.onboarding_lockdown_action)
+                            : getString(R.string.onboarding_action_disabled);
+                    slide.warningResId = lockdownEnabled ? R.string.onboarding_lockdown_sure : 0;
+                    if (lockdownEnabled) {
+                        slide.actionListener = v -> {
+                            try {
+                                // Android exposes this settings action from API 24; the string is
+                                // intentionally inlined for the API 23 fallback path.
+                                //noinspection InlinedApi
+                                Intent intent = new Intent(Settings.ACTION_VPN_SETTINGS);
+                                startActivity(intent);
+                            } catch (Throwable ex) {
+                                Log.e("Onboarding", ex.toString());
+                            }
+                        };
+                    } else {
+                        slide.actionListener = null;
+                    }
+                } else {
+                    // Android 9 (Pie): Cannot check status, so always show button and no warning
+                    slide.actionButtonText = getString(R.string.onboarding_lockdown_action);
+                    slide.warningResId = 0;
+                    slide.actionListener = v -> {
+                        try {
+                            // Android exposes this settings action from API 24; the string is
+                            // intentionally inlined for the API 23 fallback path.
+                            //noinspection InlinedApi
+                            Intent intent = new Intent(Settings.ACTION_VPN_SETTINGS);
+                            startActivity(intent);
+                        } catch (Throwable ex) {
+                            Log.e("Onboarding", ex.toString());
+                        }
+                    };
+                }
+            }
+
+            // 8. Secure DNS - Disabled for now
+            // if (slide.titleResId == R.string.onboarding_dns_title) {
+            // final SharedPreferences prefsDns =
+            // PreferenceManager.getDefaultSharedPreferences(this);
+            // boolean dohEnabled = prefsDns.getBoolean("doh_enabled", false);
+            // slide.actionButtonText = dohEnabled ?
+            // getString(R.string.onboarding_dns_action_disable)
+            // : getString(R.string.onboarding_dns_action);
+            // slide.actionListener = v -> {
+            // prefsDns.edit().putBoolean("doh_enabled", !dohEnabled).apply();
+            // refreshSlides(); // Refresh status
+            // };
+            // }
+        }
+
+        if (adapter != null) {
+            adapter.notifyDataSetChanged();
+        }
+        updateButtons(viewPager.getCurrentItem());
+    }
+
+    private void updateButtons(int position) {
+        btnNext.setEnabled(true);
+        btnNext.setAlpha(1.0f);
+        viewPager.setUserInputEnabled(true);
+
+        if (position == 0) {
+            btnPrevious.setVisibility(View.INVISIBLE);
+        } else {
+            btnPrevious.setVisibility(View.VISIBLE);
+        }
+
+        if (position == adapter.getItemCount() - 1) {
+            btnNext.setText(R.string.title_finish);
+        } else {
+            btnNext.setText(R.string.title_next);
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 0 && resultCode != RESULT_OK) {
+            // Consent was denied or silently blocked. If prepare() still returns a
+            // non-null intent, Android refused to show the consent dialog — most
+            // commonly because another app is set as Always-on VPN.
+            if (VpnService.prepare(this) != null) {
+                showAlwaysOnVpnBlockedDialog();
+            }
+        }
+    }
+
+    private void showAlwaysOnVpnBlockedDialog() {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.onboarding_vpn_blocked_title)
+                .setMessage(android.text.Html.fromHtml(
+                        getString(R.string.onboarding_vpn_blocked_desc)))
+                .setPositiveButton(R.string.onboarding_vpn_blocked_action,
+                        (DialogInterface.OnClickListener) (dialog, which) -> {
+                            try {
+                                // This is a user-facing recovery action; the settings action is
+                                // intentionally inlined for API 23 devices.
+                                //noinspection InlinedApi
+                                startActivity(new Intent(Settings.ACTION_VPN_SETTINGS));
+                            } catch (Throwable ex) {
+                                Log.e("Onboarding", ex.toString());
+                            }
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void finishOnboarding() {
+        boolean vpnPrepared = VpnService.prepare(this) == null;
+
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        prefs.edit()
+                .putInt("onboarding_version", ONBOARDING_VERSION)
+                .putBoolean("enabled", vpnPrepared)
+                .apply();
+
+        if (vpnPrepared)
+            ServiceSinkhole.start("onboarding", this, true);
+
+        startActivity(new Intent(this, ActivityMain.class));
+        finish();
+    }
+
+    private static class Slide {
+        int titleResId;
+        CharSequence title;
+        CharSequence desc;
+        int iconResId;
+        String actionButtonText;
+        int warningResId;
+        View.OnClickListener actionListener;
+        boolean isBlockingModeSlide;
+
+        Slide(int titleResId, CharSequence title, CharSequence desc, int iconResId, String actionButtonText,
+                View.OnClickListener actionListener) {
+            this(titleResId, title, desc, iconResId, actionButtonText, 0, actionListener, false);
+        }
+
+        Slide(int titleResId, CharSequence title, CharSequence desc, int iconResId, String actionButtonText,
+                int warningResId, View.OnClickListener actionListener) {
+            this(titleResId, title, desc, iconResId, actionButtonText, warningResId, actionListener, false);
+        }
+
+        Slide(int titleResId, CharSequence title, CharSequence desc, int iconResId, String actionButtonText,
+                int warningResId, View.OnClickListener actionListener, boolean isBlockingModeSlide) {
+            this.titleResId = titleResId;
+            this.title = title;
+            this.desc = desc;
+            this.iconResId = iconResId;
+            this.actionButtonText = actionButtonText;
+            this.warningResId = warningResId;
+            this.actionListener = actionListener;
+            this.isBlockingModeSlide = isBlockingModeSlide;
+        }
+    }
+
+    private class OnboardingAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+        private static final int TYPE_STANDARD = 0;
+        private static final int TYPE_BLOCKING_MODE = 1;
+        private List<Slide> slides;
+
+        OnboardingAdapter(List<Slide> slides) {
+            this.slides = slides;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            return slides.get(position).isBlockingModeSlide ? TYPE_BLOCKING_MODE : TYPE_STANDARD;
+        }
+
+        @NonNull
+        @Override
+        public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            if (viewType == TYPE_BLOCKING_MODE) {
+                View view = LayoutInflater.from(parent.getContext())
+                        .inflate(R.layout.item_onboarding_blocking_mode, parent, false);
+                return new BlockingModeViewHolder(view);
+            }
+            View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_onboarding, parent, false);
+            return new SlideViewHolder(view);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull RecyclerView.ViewHolder vh, int position) {
+            Slide slide = slides.get(position);
+
+            if (vh instanceof BlockingModeViewHolder) {
+                BlockingModeViewHolder holder = (BlockingModeViewHolder) vh;
+                holder.tvTitle.setText(slide.title);
+                holder.tvDescription.setText(slide.desc);
+                holder.ivIcon.setImageResource(slide.iconResId);
+
+                holder.rbMinimal.setText(R.string.onboarding_blockingmode_minimal_label);
+                holder.tvMinimalDesc.setText(R.string.onboarding_blockingmode_minimal_desc);
+                holder.rbStandard.setText(R.string.onboarding_blockingmode_standard_label);
+                holder.tvStandardDesc.setText(R.string.onboarding_blockingmode_standard_desc);
+                holder.rbStrict.setText(R.string.onboarding_blockingmode_strict_label);
+                holder.tvStrictDesc.setText(R.string.onboarding_blockingmode_strict_desc);
+                holder.rbResearch.setText(R.string.onboarding_blockingmode_research_label);
+                holder.tvResearchDesc.setText(R.string.onboarding_blockingmode_research_desc);
+                boolean playStoreBuild = Util.isPlayStoreInstall(holder.itemView.getContext());
+                int restrictedVisibility = playStoreBuild ? View.GONE : View.VISIBLE;
+                holder.rbStandard.setVisibility(restrictedVisibility);
+                holder.tvStandardDesc.setVisibility(restrictedVisibility);
+                holder.rbStrict.setVisibility(restrictedVisibility);
+                holder.tvStrictDesc.setVisibility(restrictedVisibility);
+
+                // Set current selection
+                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(
+                        holder.itemView.getContext());
+                boolean researchPreset = prefs.getBoolean("log_logcat", false);
+                String currentMode = BlockingMode.getMode(holder.itemView.getContext());
+                holder.rgBlockingMode.setOnCheckedChangeListener(null);
+                if (researchPreset)
+                    holder.rbResearch.setChecked(true);
+                else if (BlockingMode.MODE_MINIMAL.equals(currentMode))
+                    holder.rbMinimal.setChecked(true);
+                else if (BlockingMode.MODE_STRICT.equals(currentMode))
+                    holder.rbStrict.setChecked(true);
+                else
+                    holder.rbStandard.setChecked(true);
+
+                holder.rgBlockingMode.setOnCheckedChangeListener((group, checkedId) -> {
+                    String mode = BlockingMode.MODE_STANDARD;
+                    boolean enableSni = false;
+                    boolean enableAdbLogging = false;
+                    boolean enableDotBlocking = true;
+
+                    if (checkedId == R.id.rbMinimal)
+                        mode = BlockingMode.MODE_MINIMAL;
+                    else if (checkedId == R.id.rbStrict)
+                        mode = BlockingMode.MODE_STRICT;
+                    else if (checkedId == R.id.rbResearch) {
+                        mode = BlockingMode.MODE_MINIMAL;
+                        enableSni = true;
+                        enableAdbLogging = true;
+                        enableDotBlocking = false;
+                    }
+
+                    PreferenceManager.getDefaultSharedPreferences(holder.itemView.getContext())
+                            .edit()
+                            .putString(BlockingMode.PREF_BLOCKING_MODE, mode)
+                            .putBoolean("filter", true)
+                            .putBoolean("sni_enabled", enableSni)
+                            .putBoolean("log_logcat", enableAdbLogging)
+                            .putBoolean("block_dot", enableDotBlocking)
+                            .apply();
+
+                    BlockingMode.applyMode(holder.itemView.getContext());
+                });
+            } else {
+                SlideViewHolder holder = (SlideViewHolder) vh;
+                holder.tvTitle.setText(slide.title);
+                holder.tvDescription.setText(slide.desc);
+                holder.ivIcon.setImageResource(slide.iconResId);
+
+                if (slide.actionButtonText != null) {
+                    holder.btnAction.setVisibility(View.VISIBLE);
+                    holder.btnAction.setText(slide.actionButtonText);
+                    holder.btnAction.setEnabled(slide.actionListener != null);
+                    holder.btnAction.setOnClickListener(slide.actionListener);
+                } else {
+                    holder.btnAction.setVisibility(View.GONE);
+                }
+            }
+        }
+
+        @Override
+        public int getItemCount() {
+            return slides.size();
+        }
+
+        class SlideViewHolder extends RecyclerView.ViewHolder {
+            TextView tvTitle, tvDescription;
+            Button btnAction;
+            android.widget.ImageView ivIcon;
+
+            SlideViewHolder(@NonNull View itemView) {
+                super(itemView);
+                tvTitle = itemView.findViewById(R.id.tvTitle);
+                tvDescription = itemView.findViewById(R.id.tvDescription);
+                btnAction = itemView.findViewById(R.id.btnAction);
+                ivIcon = itemView.findViewById(R.id.ivIcon);
+            }
+        }
+
+        class BlockingModeViewHolder extends RecyclerView.ViewHolder {
+            TextView tvTitle, tvDescription;
+            android.widget.ImageView ivIcon;
+            RadioGroup rgBlockingMode;
+            RadioButton rbMinimal, rbStandard, rbStrict, rbResearch;
+            TextView tvMinimalDesc, tvStandardDesc, tvStrictDesc, tvResearchDesc;
+
+            BlockingModeViewHolder(@NonNull View itemView) {
+                super(itemView);
+                tvTitle = itemView.findViewById(R.id.tvTitle);
+                tvDescription = itemView.findViewById(R.id.tvDescription);
+                ivIcon = itemView.findViewById(R.id.ivIcon);
+                rgBlockingMode = itemView.findViewById(R.id.rgBlockingMode);
+                rbMinimal = itemView.findViewById(R.id.rbMinimal);
+                rbStandard = itemView.findViewById(R.id.rbStandard);
+                rbStrict = itemView.findViewById(R.id.rbStrict);
+                rbResearch = itemView.findViewById(R.id.rbResearch);
+                tvMinimalDesc = itemView.findViewById(R.id.tvMinimalDesc);
+                tvStandardDesc = itemView.findViewById(R.id.tvStandardDesc);
+                tvStrictDesc = itemView.findViewById(R.id.tvStrictDesc);
+                tvResearchDesc = itemView.findViewById(R.id.tvResearchDesc);
+            }
+        }
+    }
+}

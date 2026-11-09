@@ -1,0 +1,13 @@
+1st anniversary edition
+- Redesign of app
+- Ad-blocking: custom host lists, disabling per-app
+- Blocking by company
+- Find trackers hiding via DNS cloaking
+- Non-strict mode to reduce breakage (beta)
+- Block Internet from main screen
+- 'Clear' button for seen trackers, 'uninstall' button
+- Fix crashes & bugs, incl. F-Droid/Android 11 issue
+- Update block lists, mark trackers 'essential'
+- Add Italian, more localisation
+- Only auto-wipe logs if enabled
+- Cleanup after uninstalls, update libraries

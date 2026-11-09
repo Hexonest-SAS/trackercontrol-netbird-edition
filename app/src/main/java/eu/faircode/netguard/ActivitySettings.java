@@ -1,0 +1,1846 @@
+/*
+ * This file is from NetGuard.
+ *
+ * NetGuard is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * NetGuard is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with NetGuard.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * Copyright © 2015–2020 Marcel Bokhorst (M66B)
+ * Copyright © 2019–2026 Konrad Kollnig
+ */
+
+package eu.faircode.netguard;
+
+import static net.kollnig.missioncontrol.data.TrackerBlocklist.PREF_BLOCKLIST;
+
+import android.Manifest;
+import android.annotation.SuppressLint;
+import android.content.ActivityNotFoundException;
+import android.content.ContentResolver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.content.res.AssetFileDescriptor;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.AsyncTask;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import androidx.preference.EditTextPreference;
+import androidx.preference.Preference;
+import androidx.preference.PreferenceFragmentCompat;
+import androidx.preference.PreferenceGroup;
+import androidx.preference.PreferenceScreen;
+import androidx.preference.TwoStatePreference;
+import android.text.TextUtils;
+import android.util.Log;
+import android.util.Xml;
+import android.view.MenuItem;
+import android.view.View;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
+
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.NavUtils;
+import androidx.core.graphics.Insets;
+import androidx.core.util.PatternsCompat;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentManager;
+import androidx.preference.ListPreference;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+import androidx.preference.PreferenceManager;
+import androidx.work.Constraints;
+import androidx.work.NetworkType;
+import androidx.work.OneTimeWorkRequest;
+import androidx.work.WorkManager;
+
+import net.kollnig.missioncontrol.BuildConfig;
+import net.kollnig.missioncontrol.LocalNetworkAccess;
+import net.kollnig.missioncontrol.R;
+import net.kollnig.missioncontrol.data.BlockingMode;
+import net.kollnig.missioncontrol.data.InternetBlocklist;
+import net.kollnig.missioncontrol.data.PackageUids;
+import net.kollnig.missioncontrol.data.PausedApps;
+import net.kollnig.missioncontrol.data.TrackerBlocklist;
+import net.kollnig.missioncontrol.data.TrackerList;
+import net.kollnig.missioncontrol.wg.WgProfileManager;
+
+import org.xml.sax.Attributes;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+import org.xml.sax.XMLReader;
+import org.xml.sax.helpers.DefaultHandler;
+import org.xmlpull.v1.XmlSerializer;
+
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.UnknownHostException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+
+import okhttp3.HttpUrl;
+
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.parsers.SAXParserFactory;
+
+public class ActivitySettings extends AppCompatActivity implements SharedPreferences.OnSharedPreferenceChangeListener, PreferenceFragmentCompat.OnPreferenceStartScreenCallback {
+    private static final String TAG = "TrackerControl.Settings";
+
+    private boolean running = false;
+    private final Handler wgStatusHandler = new Handler(Looper.getMainLooper());
+    private final Runnable wgStatusListener = new Runnable() {
+        @Override
+        public void run() {
+            // Posted from WgEgress on a non-UI thread; bounce to UI.
+            wgStatusHandler.post(() -> {
+                if (running) updateWireGuardStatus();
+            });
+        }
+    };
+
+    private static final int REQUEST_EXPORT = 1;
+    private static final int REQUEST_IMPORT = 2;
+    private static final int REQUEST_CALL = 5;
+    private static final int REQUEST_LOCAL_NETWORK = 6;
+
+    private boolean requestedLocalNetwork = false;
+
+    private static final Intent INTENT_VPN_SETTINGS = new Intent("android.net.vpn.SETTINGS");
+
+    protected void onCreate(Bundle savedInstanceState) {
+        setTheme(R.style.AppThemeRed_NoActionBar);
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_settings);
+
+        com.google.android.material.appbar.MaterialToolbar toolbar = findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
+        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+
+        // Pad the AppBarLayout so its colored background extends behind the status bar
+        com.google.android.material.appbar.AppBarLayout appBar = findViewById(R.id.appbar);
+        final int appBarInitialTop = appBar.getPaddingTop();
+        ViewCompat.setOnApplyWindowInsetsListener(appBar, (v, insets) -> {
+            Insets sysBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(v.getPaddingLeft(), appBarInitialTop + sysBars.top,
+                    v.getPaddingRight(), v.getPaddingBottom());
+            return insets;
+        });
+
+        // Pad the settings container by the bottom system bar inset so the last
+        // preference is reachable above the navigation bar.
+        View settingsContainer = findViewById(R.id.settings_container);
+        final int containerInitialBottom = settingsContainer.getPaddingBottom();
+        ViewCompat.setOnApplyWindowInsetsListener(settingsContainer, (v, insets) -> {
+            Insets sysBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(v.getPaddingLeft(), v.getPaddingTop(),
+                    v.getPaddingRight(), containerInitialBottom + sysBars.bottom);
+            return insets;
+        });
+
+        getSupportFragmentManager().registerFragmentLifecycleCallbacks(new FragmentManager.FragmentLifecycleCallbacks() {
+            @Override
+            public void onFragmentResumed(@NonNull FragmentManager fm, @NonNull Fragment f) {
+                super.onFragmentResumed(fm, f);
+                if (f instanceof FragmentSettings) {
+                    configurePreferences();
+                }
+            }
+        }, false);
+
+        if (savedInstanceState == null) {
+            getSupportFragmentManager().beginTransaction()
+                    .replace(R.id.settings_container, new FragmentSettings())
+                    .commit();
+        }
+        running = true;
+    }
+
+    private PreferenceScreen getPreferenceScreen() {
+        return ((PreferenceFragmentCompat) getSupportFragmentManager().findFragmentById(R.id.settings_container)).getPreferenceScreen();
+    }
+
+    @Override
+    public boolean onPreferenceStartScreen(PreferenceFragmentCompat caller, PreferenceScreen pref) {
+        FragmentSettings fragment = new FragmentSettings();
+        Bundle args = new Bundle();
+        args.putString(PreferenceFragmentCompat.ARG_PREFERENCE_ROOT, pref.getKey());
+        fragment.setArguments(args);
+
+        getSupportFragmentManager().beginTransaction()
+                .replace(R.id.settings_container, fragment)
+                .addToBackStack(pref.getKey())
+                .commit();
+        return true;
+    }
+
+    @Override
+    protected void onPostCreate(Bundle savedInstanceState) {
+        super.onPostCreate(savedInstanceState);
+        configurePreferences();
+    }
+
+    // This preference action launches a bounded database task; lifecycle-aware
+    // executor migration is deliberately outside this focused lint change.
+    @SuppressLint("StaticFieldLeak")
+    private void configurePreferences() {
+        final PreferenceScreen screen = getPreferenceScreen();
+        final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        BlockingMode.enforcePlayStoreMode(this);
+
+        // Find category groups (may be null depending on which sub-screen is showing)
+        PreferenceGroup cat_options = (PreferenceGroup) screen.findPreference("category_options");
+
+        PreferenceGroup screenAdvanced = (PreferenceGroup) screen.findPreference("screen_advanced_options");
+        PreferenceGroup cat_advanced = screenAdvanced != null
+                ? (PreferenceGroup) screenAdvanced.findPreference("category_advanced_options") : null;
+        if (cat_advanced == null)
+            cat_advanced = (PreferenceGroup) screen.findPreference("category_advanced_options");
+
+        PreferenceGroup cat_backup = (PreferenceGroup) screen.findPreference("category_backup");
+
+        // Handle pause
+        Preference pref_pause = screen.findPreference("pause");
+        if (pref_pause != null)
+            pref_pause.setTitle(getString(R.string.setting_pause, prefs.getString("pause", "10")));
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && cat_advanced != null) {
+            TwoStatePreference pref_handover = (TwoStatePreference) screen.findPreference("handover");
+            if (pref_handover != null)
+                cat_advanced.removePreference(pref_handover);
+        }
+
+        Preference pref_reset_usage = screen.findPreference("reset_usage");
+        if (pref_reset_usage != null) {
+            pref_reset_usage.setOnPreferenceClickListener(new Preference.OnPreferenceClickListener() {
+                @Override
+                public boolean onPreferenceClick(Preference preference) {
+                    Util.areYouSure(ActivitySettings.this, R.string.setting_reset_usage, new Util.DoubtListener() {
+                        @Override
+                        public void onSure() {
+                            new AsyncTask<Object, Object, Throwable>() {
+                                @Override
+                                protected Throwable doInBackground(Object... objects) {
+                                    try {
+                                        DatabaseHelper.getInstance(ActivitySettings.this).resetUsage(-1);
+                                        return null;
+                                    } catch (Throwable ex) {
+                                        return ex;
+                                    }
+                                }
+
+                                @Override
+                                protected void onPostExecute(Throwable ex) {
+                                    if (!running)
+                                        return;
+                                    if (ex == null)
+                                        Toast.makeText(ActivitySettings.this, R.string.msg_completed, Toast.LENGTH_LONG)
+                                                .show();
+                                    else
+                                        Toast.makeText(ActivitySettings.this, ex.toString(), Toast.LENGTH_LONG).show();
+                                }
+                            }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+                        }
+                    });
+                    return false;
+                }
+            });
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            TwoStatePreference pref_reload_onconnectivity = (TwoStatePreference) screen
+                    .findPreference("reload_onconnectivity");
+            if (pref_reload_onconnectivity != null) {
+                pref_reload_onconnectivity.setChecked(true);
+                pref_reload_onconnectivity.setEnabled(false);
+            }
+        }
+
+        // Handle port forwarding
+        Preference pref_forwarding = screen.findPreference("forwarding");
+        if (pref_forwarding != null) {
+            pref_forwarding.setOnPreferenceClickListener(new Preference.OnPreferenceClickListener() {
+                @Override
+                public boolean onPreferenceClick(Preference preference) {
+                    startActivity(new Intent(ActivitySettings.this, ActivityForwarding.class));
+                    return true;
+                }
+            });
+        }
+
+        // VPN parameters
+        Preference pref_vpn4 = screen.findPreference("vpn4");
+        if (pref_vpn4 != null)
+            pref_vpn4.setTitle(getString(R.string.setting_vpn4, prefs.getString("vpn4", "10.1.10.1")));
+        Preference pref_vpn6 = screen.findPreference("vpn6");
+        if (pref_vpn6 != null)
+            pref_vpn6.setTitle(getString(R.string.setting_vpn6, prefs.getString("vpn6", "fd00:1:fd00:1:fd00:1:fd00:1")));
+        EditTextPreference pref_dns1 = (EditTextPreference) screen.findPreference("dns");
+        EditTextPreference pref_dns2 = (EditTextPreference) screen.findPreference("dns2");
+        EditTextPreference pref_validate = (EditTextPreference) screen.findPreference("validate");
+        EditTextPreference pref_ttl = (EditTextPreference) screen.findPreference("ttl");
+        if (pref_dns1 != null)
+            pref_dns1.setTitle(getString(R.string.setting_dns, prefs.getString("dns", "-")));
+        if (pref_dns2 != null)
+            pref_dns2.setTitle(getString(R.string.setting_dns, prefs.getString("dns2", "-")));
+        if (pref_validate != null)
+            pref_validate.setTitle(getString(R.string.setting_validate, prefs.getString("validate", "www.f-droid.org")));
+        if (pref_ttl != null)
+            pref_ttl.setTitle(getString(R.string.setting_ttl, prefs.getString("ttl", "259200")));
+
+        // SOCKS5 parameters
+        Preference pref;
+        pref = screen.findPreference("socks5_addr");
+        if (pref != null)
+            pref.setTitle(getString(R.string.setting_socks5_addr, prefs.getString("socks5_addr", "-")));
+        pref = screen.findPreference("socks5_port");
+        if (pref != null)
+            pref.setTitle(getString(R.string.setting_socks5_port, prefs.getString("socks5_port", "-")));
+        pref = screen.findPreference("socks5_username");
+        if (pref != null)
+            pref.setTitle(getString(R.string.setting_socks5_username, prefs.getString("socks5_username", "-")));
+        pref = screen.findPreference("socks5_password");
+        if (pref != null)
+            pref.setTitle(getString(R.string.setting_socks5_password,
+                    TextUtils.isEmpty(prefs.getString("socks5_username", "")) ? "-" : "*****"));
+
+        // PCAP parameters
+        pref = screen.findPreference("pcap_record_size");
+        if (pref != null)
+            pref.setTitle(getString(R.string.setting_pcap_record_size, prefs.getString("pcap_record_size", "64")));
+        pref = screen.findPreference("pcap_file_size");
+        if (pref != null)
+            pref.setTitle(getString(R.string.setting_pcap_file_size, prefs.getString("pcap_file_size", "2")));
+
+        // DoH endpoint
+        EditTextPreference pref_doh_endpoint = (EditTextPreference) screen.findPreference("doh_endpoint");
+        if (pref_doh_endpoint != null) {
+            configureDohEndpointPreference(pref_doh_endpoint);
+            pref_doh_endpoint.setSummary(prefs.getString("doh_endpoint", BuildConfig.DEFAULT_DOH_ENDPOINT));
+        }
+
+        // WireGuard status
+        new WgProfileManager(this).migrateIfNeeded();
+        configureWireGuardProfiles(screen, prefs);
+        CharSequence wgStatus = getWireGuardStatusSummary(prefs);
+        pref = screen.findPreference("screen_wireguard");
+        if (pref != null)
+            pref.setSummary(wgStatus);
+        pref = screen.findPreference("wg_status");
+        if (pref != null)
+            pref.setSummary(wgStatus);
+
+        // Show resolved
+        Preference pref_show_resolved = screen.findPreference("show_resolved");
+        if (pref_show_resolved != null) {
+            pref_show_resolved.setOnPreferenceClickListener(new Preference.OnPreferenceClickListener() {
+                @Override
+                public boolean onPreferenceClick(Preference preference) {
+                    startActivity(new Intent(ActivitySettings.this, ActivityDns.class));
+                    return true;
+                }
+            });
+        }
+
+        // Handle export
+        // Do not gate on resolveActivity(): on some ROMs (e.g. without the
+        // system DocumentsUI) it wrongly returns null and silently greys out
+        // Backup, even though the picker would launch. Keep it enabled and fail
+        // gracefully with a message instead (issue #308).
+        Preference pref_export = screen.findPreference("export");
+        if (pref_export != null) {
+            pref_export.setOnPreferenceClickListener(new Preference.OnPreferenceClickListener() {
+                @Override
+                public boolean onPreferenceClick(Preference preference) {
+                    try {
+                        startActivityForResult(getIntentCreateExport(), ActivitySettings.REQUEST_EXPORT);
+                    } catch (ActivityNotFoundException ex) {
+                        Toast.makeText(ActivitySettings.this, R.string.msg_no_file_manager, Toast.LENGTH_LONG).show();
+                    }
+                    return true;
+                }
+            });
+        }
+
+        // Handle import
+        Preference pref_import = screen.findPreference("import");
+        if (pref_import != null) {
+            pref_import.setOnPreferenceClickListener(new Preference.OnPreferenceClickListener() {
+                @Override
+                public boolean onPreferenceClick(Preference preference) {
+                    try {
+                        startActivityForResult(getIntentOpenExport(), ActivitySettings.REQUEST_IMPORT);
+                    } catch (ActivityNotFoundException ex) {
+                        Toast.makeText(ActivitySettings.this, R.string.msg_no_file_manager, Toast.LENGTH_LONG).show();
+                    }
+                    return true;
+                }
+            });
+        }
+
+        // Custom lists cannot affect the Play build's Minimal-only policy.
+        if (BlockingMode.isPlayStoreBuild() && cat_advanced != null) {
+            for (String key : new String[]{"manage_blocklists", "hosts_download", "hosts_auto_update"}) {
+                Preference preference = cat_advanced.findPreference(key);
+                if (preference != null)
+                    cat_advanced.removePreference(preference);
+            }
+        }
+
+        // Hosts file settings
+        if (cat_advanced != null) {
+            Preference pref_use_hosts = screen.findPreference("use_hosts");
+            if (pref_use_hosts != null)
+                cat_advanced.removePreference(pref_use_hosts);
+        }
+        EditTextPreference pref_rcode = (EditTextPreference) screen.findPreference("rcode");
+        final Preference pref_hosts_download = screen.findPreference("hosts_download");
+
+        Preference pref_manage_blocklists = screen.findPreference("manage_blocklists");
+        if (pref_manage_blocklists != null) {
+            pref_manage_blocklists.setOnPreferenceClickListener(preference -> {
+                startActivity(new Intent(ActivitySettings.this, net.kollnig.missioncontrol.ActivityBlocklists.class));
+                return true;
+            });
+        }
+
+        Preference pref_exclude_all = screen.findPreference("exclude_all_tracking");
+        if (pref_exclude_all != null) {
+            pref_exclude_all.setOnPreferenceClickListener(preference -> {
+                Util.areYouSure(ActivitySettings.this, R.string.summary_exclude_all_tracking, new Util.DoubtListener() {
+                    @Override
+                    public void onSure() {
+                        setTrackerProtectionForAll(false);
+                    }
+                });
+                return true;
+            });
+        }
+
+        Preference pref_include_all = screen.findPreference("include_all_tracking");
+        if (pref_include_all != null) {
+            pref_include_all.setOnPreferenceClickListener(preference -> {
+                Util.areYouSure(ActivitySettings.this, R.string.summary_include_all_tracking, new Util.DoubtListener() {
+                    @Override
+                    public void onSure() {
+                        setTrackerProtectionForAll(true);
+                    }
+                });
+                return true;
+            });
+        }
+
+        if (pref_rcode != null && cat_advanced != null) {
+            pref_rcode.setTitle(getString(R.string.setting_rcode, prefs.getString("rcode", "3")));
+            cat_advanced.removePreference(pref_rcode);
+        }
+
+        if (cat_options != null) {
+            if (Util.isFDroidInstall() || Util.isPlayStoreInstall(this)) {
+                Preference pref_update = screen.findPreference("update_check");
+                if (pref_update != null)
+                    cat_options.removePreference(pref_update);
+            }
+        }
+
+        // Blocking mode preference setup
+        Preference pref_blocking_mode = screen.findPreference("blocking_mode");
+        if (pref_blocking_mode != null) {
+            String currentMode = BlockingMode.getMode(this);
+            if (Util.isPlayStoreInstall(this) && pref_blocking_mode instanceof ListPreference) {
+                ListPreference listPreference = (ListPreference) pref_blocking_mode;
+                listPreference.setEntries(new CharSequence[]{getString(R.string.blocking_mode_minimal)});
+                listPreference.setEntryValues(new CharSequence[]{BlockingMode.MODE_MINIMAL});
+                listPreference.setValue(BlockingMode.MODE_MINIMAL);
+                listPreference.setEnabled(false);
+            }
+            updateBlockingModeSummary(pref_blocking_mode, currentMode);
+        }
+
+        Preference pref_log_logcat = screen.findPreference("log_logcat");
+        if (pref_log_logcat != null)
+            updateResearchModeSummary(pref_log_logcat);
+
+        if (Util.isPlayStoreInstall(this) && cat_advanced != null) {
+            Log.i(TAG, "Play store install");
+            if (pref_forwarding != null)
+                cat_advanced.removePreference(pref_forwarding);
+
+            Preference p;
+            p = cat_advanced.findPreference("domain_based_blocking");
+            if (p != null) cat_advanced.removePreference(p);
+            p = cat_advanced.findPreference("log_app");
+            if (p != null) cat_advanced.removePreference(p);
+        }
+
+        String last_download = prefs.getString("hosts_last_download", null);
+        if (pref_hosts_download != null) {
+            if (last_download != null)
+                pref_hosts_download.setSummary(getString(R.string.msg_update_last, last_download));
+
+            pref_hosts_download.setOnPreferenceClickListener(preference -> {
+                Constraints constraints = new Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build();
+
+                OneTimeWorkRequest downloadWork = new OneTimeWorkRequest.Builder(HostsDownloadWorker.class)
+                        .setConstraints(constraints)
+                        .addTag("ManualHostsDownload")
+                        .build();
+                WorkManager.getInstance(ActivitySettings.this).enqueue(downloadWork);
+                return true;
+            });
+
+            WorkManager.getInstance(this).getWorkInfosByTagLiveData("ManualHostsDownload").observe(this, workInfos -> {
+                if (workInfos != null && !workInfos.isEmpty()) {
+                    androidx.work.WorkInfo workInfo = workInfos.get(0);
+                    if (workInfo.getState() == androidx.work.WorkInfo.State.SUCCEEDED) {
+                        String last = SimpleDateFormat.getDateTimeInstance().format(new Date().getTime());
+                        pref_hosts_download.setSummary(getString(R.string.msg_update_last, last));
+                    }
+                }
+            });
+        }
+
+        eu.faircode.netguard.SwitchPreference pref_hosts_auto_update = (eu.faircode.netguard.SwitchPreference) screen
+                .findPreference("hosts_auto_update");
+        if (pref_hosts_auto_update != null) {
+            pref_hosts_auto_update.setOnPreferenceChangeListener(new Preference.OnPreferenceChangeListener() {
+                @Override
+                public boolean onPreferenceChange(Preference preference, Object newValue) {
+                    HostsDownloadWorker.scheduleAutoUpdate(ActivitySettings.this, (Boolean) newValue);
+                    return true;
+                }
+            });
+        }
+
+        // Development
+        if (!Util.isDebuggable(this)) {
+            Preference screenDevelopment = screen.findPreference("screen_development");
+            if (screenDevelopment != null)
+                screen.removePreference(screenDevelopment);
+        } else {
+            Preference rotateKeys = screen.findPreference("vpn_key_rotate_now");
+            if (rotateKeys != null)
+                rotateKeys.setOnPreferenceClickListener(preference -> {
+                    Toast.makeText(ActivitySettings.this,
+                            R.string.msg_vpn_key_rotation_started,
+                            Toast.LENGTH_LONG).show();
+                    net.kollnig.missioncontrol.wg.VpnKeyRotationManager.rotateAllForDebug(
+                            ActivitySettings.this,
+                            summary -> wgStatusHandler.post(() ->
+                                    Toast.makeText(ActivitySettings.this, summary,
+                                            Toast.LENGTH_LONG).show()));
+                    return true;
+                });
+        }
+    }
+
+    private void configureWireGuardProfiles(PreferenceScreen screen, SharedPreferences prefs) {
+        WgProfileManager manager = new WgProfileManager(this);
+        manager.migrateIfNeeded();
+        java.util.List<WgProfileManager.Profile> profiles = manager.getProfiles();
+        WgProfileManager.Profile activeProfile = manager.getActiveProfile();
+        ListPreference profilePref = (ListPreference) screen.findPreference(WgProfileManager.PREF_WG_PROFILE);
+        Preference managePref = screen.findPreference("wg_profile_manage");
+
+        if (profilePref != null) {
+            if (profiles.isEmpty()) {
+                profilePref.setEnabled(false);
+                profilePref.setEntries(new CharSequence[0]);
+                profilePref.setEntryValues(new CharSequence[0]);
+                profilePref.setSummary(R.string.summary_wg_profile_none);
+            } else {
+                CharSequence[] entries = new CharSequence[profiles.size()];
+                CharSequence[] values = new CharSequence[profiles.size()];
+                for (int i = 0; i < profiles.size(); i++) {
+                    WgProfileManager.Profile profile = profiles.get(i);
+                    entries[i] = profile.name;
+                    values[i] = profile.id;
+                }
+                profilePref.setEnabled(true);
+                profilePref.setEntries(entries);
+                profilePref.setEntryValues(values);
+                profilePref.setValue(manager.getActiveProfileId());
+                profilePref.setSummary(activeProfile == null
+                        ? getString(R.string.summary_wg_profile)
+                        : activeProfile.name);
+                profilePref.setOnPreferenceChangeListener((preference, newValue) -> {
+                    applyWireGuardProfile((String) newValue);
+                    return false;
+                });
+            }
+        }
+
+        if (managePref != null) {
+            managePref.setOnPreferenceClickListener(preference -> {
+                startActivity(new Intent(ActivitySettings.this,
+                        net.kollnig.missioncontrol.ActivityWireGuardProfiles.class));
+                return true;
+            });
+        }
+    }
+
+    private void applyWireGuardProfile(String id) {
+        WgProfileManager manager = new WgProfileManager(this);
+        manager.setActiveProfile(id);
+        configureWireGuardProfiles(getPreferenceScreen(), PreferenceManager.getDefaultSharedPreferences(this));
+        updateWireGuardStatus();
+        ServiceSinkhole.reload("changed " + WgProfileManager.PREF_WG_PROFILE, this, false);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        checkPermissions(null);
+
+        // Listen for preference changes
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        prefs.registerOnSharedPreferenceChangeListener(this);
+
+        net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.addStateListener(wgStatusListener);
+        PreferenceScreen screen = getPreferenceScreen();
+        if (screen != null)
+            configureWireGuardProfiles(screen, prefs);
+        updateWireGuardStatus();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        prefs.unregisterOnSharedPreferenceChangeListener(this);
+
+        net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.removeStateListener(wgStatusListener);
+    }
+
+    @Override
+    protected void onDestroy() {
+        running = false;
+        wgStatusHandler.removeCallbacksAndMessages(null);
+        super.onDestroy();
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        switch (item.getItemId()) {
+            case android.R.id.home:
+                Log.i(TAG, "Up");
+                if (getSupportFragmentManager().getBackStackEntryCount() > 0)
+                    getSupportFragmentManager().popBackStack();
+                else
+                    NavUtils.navigateUpFromSameTask(this);
+                return true;
+            default:
+                return super.onOptionsItemSelected(item);
+        }
+    }
+
+    @Override
+    public void onSharedPreferenceChanged(SharedPreferences prefs, String name) {
+        if ("show_stats".equals(name)) {
+            ((TwoStatePreference) getPreferenceScreen().findPreference(name)).setChecked(prefs.getBoolean(name, false));
+        }
+
+        Object value = prefs.getAll().get(name);
+        if (value instanceof String && "".equals(value))
+            prefs.edit().remove(name).apply();
+
+        // Dependencies
+        if ("pause".equals(name))
+            getPreferenceScreen().findPreference(name)
+                    .setTitle(getString(R.string.setting_pause, prefs.getString(name, "10")));
+
+        else if ("ip6".equals(name))
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        else if ("use_metered".equals(name))
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        else if ("include_system_vpn".equals(name)) {
+            // Single user-facing "Monitor system apps" toggle. It drives three
+            // internal prefs kept in lock-step: include_system_vpn (VPN routing),
+            // manage_system (tracker detection/blocking for system apps), and
+            // show_system (visibility in the app list / insights).
+            boolean monitorSystem = prefs.getBoolean(name, false);
+            prefs.edit().putBoolean("manage_system", monitorSystem).apply();
+            prefs.edit().putBoolean("show_system", monitorSystem).apply();
+            if (!monitorSystem)
+                prefs.edit().putBoolean("show_user", true).apply();
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("wifi_only".equals(name) ||
+                "screen_delay".equals(name))
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        else if ("disable_on_call".equals(name)) {
+            if (prefs.getBoolean(name, false)) {
+                if (checkPermissions(name))
+                    ServiceSinkhole.reload("changed " + name, this, false);
+            } else
+                ServiceSinkhole.reload("changed " + name, this, false);
+        }
+
+        else if ("blocking_mode".equals(name)) {
+            if (Util.isPlayStoreInstall(this))
+                BlockingMode.enforcePlayStoreMode(this);
+            String mode = BlockingMode.getMode(this);
+            Preference pref = getPreferenceScreen().findPreference(name);
+            if (pref != null)
+                updateBlockingModeSummary(pref, mode);
+            BlockingMode.applyMode(this);
+        }
+
+        else if ("log_logcat".equals(name)) {
+            boolean research = prefs.getBoolean(name, false);
+            if (prefs.getBoolean("sni_enabled", false) != research)
+                prefs.edit().putBoolean("sni_enabled", research).apply();
+            refreshResearchModeSummary();
+            ServiceSinkhole.reload("changed " + name, this, false);
+        }
+
+        else if ("sni_enabled".equals(name)) {
+            refreshResearchModeSummary();
+            ServiceSinkhole.reload("changed " + name, this, false);
+        }
+
+        else if ("tcp_mss_clamp".equals(name)) {
+            ServiceSinkhole.reload("changed " + name, this, false);
+        }
+
+        else if ("manage_system".equals(name)) {
+            boolean manage = prefs.getBoolean(name, false);
+            if (!manage)
+                prefs.edit().putBoolean("show_user", true).apply();
+            prefs.edit().putBoolean("show_system", manage).apply();
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("log_app".equals(name)) {
+            Intent ruleset = new Intent(ActivityMain.ACTION_RULES_CHANGED);
+            LocalBroadcastManager.getInstance(this).sendBroadcast(ruleset);
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("notify_access".equals(name))
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        else if ("use_hosts".equals(name))
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        else if ("vpn4".equals(name)) {
+            String vpn4 = prefs.getString(name, null);
+            try {
+                checkAddress(vpn4, false);
+                prefs.edit().putString(name, vpn4.trim()).apply();
+            } catch (Throwable ex) {
+                prefs.edit().remove(name).apply();
+                ((EditTextPreference) getPreferenceScreen().findPreference(name)).setText(null);
+                if (!TextUtils.isEmpty(vpn4))
+                    Toast.makeText(ActivitySettings.this, ex.toString(), Toast.LENGTH_LONG).show();
+            }
+            getPreferenceScreen().findPreference(name).setTitle(
+                    getString(R.string.setting_vpn4, prefs.getString(name, "10.1.10.1")));
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("vpn6".equals(name)) {
+            String vpn6 = prefs.getString(name, null);
+            try {
+                checkAddress(vpn6, false);
+                prefs.edit().putString(name, vpn6.trim()).apply();
+            } catch (Throwable ex) {
+                prefs.edit().remove(name).apply();
+                ((EditTextPreference) getPreferenceScreen().findPreference(name)).setText(null);
+                if (!TextUtils.isEmpty(vpn6))
+                    Toast.makeText(ActivitySettings.this, ex.toString(), Toast.LENGTH_LONG).show();
+            }
+            getPreferenceScreen().findPreference(name).setTitle(
+                    getString(R.string.setting_vpn6, prefs.getString(name, "fd00:1:fd00:1:fd00:1:fd00:1")));
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("dns".equals(name) || "dns2".equals(name)) {
+            String dns = prefs.getString(name, null);
+            try {
+                checkAddress(dns, true);
+                prefs.edit().putString(name, dns.trim()).apply();
+            } catch (Throwable ex) {
+                prefs.edit().remove(name).apply();
+                ((EditTextPreference) getPreferenceScreen().findPreference(name)).setText(null);
+                if (!TextUtils.isEmpty(dns))
+                    Toast.makeText(ActivitySettings.this, ex.toString(), Toast.LENGTH_LONG).show();
+            }
+            getPreferenceScreen().findPreference(name).setTitle(
+                    getString(R.string.setting_dns, prefs.getString(name, "-")));
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("doh_enabled".equals(name)) {
+            // Reset DoH client when toggled
+            net.kollnig.missioncontrol.dns.DnsOverHttpsClient.resetInstance();
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("doh_endpoint".equals(name)) {
+            Preference dohEndpoint = getPreferenceScreen().findPreference(name);
+            if (dohEndpoint != null)
+                dohEndpoint.setSummary(prefs.getString(name, BuildConfig.DEFAULT_DOH_ENDPOINT));
+            // Reset DoH client to pick up new endpoint
+            net.kollnig.missioncontrol.dns.DnsOverHttpsClient.resetInstance();
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("validate".equals(name)) {
+            String host = prefs.getString(name, "www.f-droid.org");
+            try {
+                checkDomain(host);
+                prefs.edit().putString(name, host.trim()).apply();
+            } catch (Throwable ex) {
+                prefs.edit().remove(name).apply();
+                ((EditTextPreference) getPreferenceScreen().findPreference(name)).setText(null);
+                if (!TextUtils.isEmpty(host))
+                    Toast.makeText(ActivitySettings.this, ex.toString(), Toast.LENGTH_LONG).show();
+            }
+            getPreferenceScreen().findPreference(name).setTitle(
+                    getString(R.string.setting_validate, prefs.getString(name, "www.f-droid.org")));
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("ttl".equals(name))
+            getPreferenceScreen().findPreference(name).setTitle(
+                    getString(R.string.setting_ttl, prefs.getString(name, "259200")));
+
+        else if ("rcode".equals(name)) {
+            getPreferenceScreen().findPreference(name).setTitle(
+                    getString(R.string.setting_rcode, prefs.getString(name, "3")));
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("socks5_enabled".equals(name))
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        else if ("socks5_addr".equals(name)) {
+            String socks5_addr = prefs.getString(name, null);
+            try {
+                if (!TextUtils.isEmpty(socks5_addr) && !Util.isNumericAddress(socks5_addr))
+                    throw new IllegalArgumentException("Bad address");
+            } catch (Throwable ex) {
+                prefs.edit().remove(name).apply();
+                ((EditTextPreference) getPreferenceScreen().findPreference(name)).setText(null);
+                if (!TextUtils.isEmpty(socks5_addr))
+                    Toast.makeText(ActivitySettings.this, ex.toString(), Toast.LENGTH_LONG).show();
+            }
+            getPreferenceScreen().findPreference(name).setTitle(
+                    getString(R.string.setting_socks5_addr, prefs.getString(name, "-")));
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("socks5_port".equals(name)) {
+            getPreferenceScreen().findPreference(name)
+                    .setTitle(getString(R.string.setting_socks5_port, prefs.getString(name, "-")));
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("socks5_username".equals(name)) {
+            getPreferenceScreen().findPreference(name)
+                    .setTitle(getString(R.string.setting_socks5_username, prefs.getString(name, "-")));
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("socks5_password".equals(name)) {
+            getPreferenceScreen().findPreference(name).setTitle(getString(R.string.setting_socks5_password,
+                    TextUtils.isEmpty(prefs.getString(name, "")) ? "-" : "*****"));
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if (WgProfileManager.PREF_WG_PROFILE.equals(name) ||
+                WgProfileManager.PREF_WG_PROFILES.equals(name)) {
+            new WgProfileManager(this).migrateIfNeeded();
+            configureWireGuardProfiles(getPreferenceScreen(), prefs);
+            updateWireGuardStatus();
+
+        } else if ("wg_enabled".equals(name)) {
+            updateWireGuardStatus();
+            refreshResearchModeSummary();
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("wg_keepalive_when_screen_off".equals(name)) {
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if (Rule.PREF_WG_ROUTE_MODE.equals(name)) {
+            // The reload restarts the tunnel thread, which is what picks up the
+            // matching fwd53 change — that flag is only read at jni_run.
+            Rule.clearCache(this);
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("wg_config".equals(name)) {
+            String wg_config = prefs.getString(name, null);
+            boolean valid = true;
+            if (!TextUtils.isEmpty(wg_config)) {
+                try {
+                    net.kollnig.missioncontrol.wg.WgConfigParser.INSTANCE.parse(wg_config);
+                } catch (Throwable ex) {
+                    valid = false;
+                    Toast.makeText(ActivitySettings.this,
+                            getString(R.string.msg_wg_config_invalid, ex.getMessage()),
+                            Toast.LENGTH_LONG).show();
+                    // Force-disable to avoid silently running with a bad config.
+                    prefs.edit().putBoolean("wg_enabled", false).apply();
+                    eu.faircode.netguard.SwitchPreference enabledPref =
+                            (eu.faircode.netguard.SwitchPreference)
+                                    getPreferenceScreen().findPreference("wg_enabled");
+                    if (enabledPref != null) enabledPref.setChecked(false);
+                }
+            }
+            if (valid)
+                new WgProfileManager(this).updateActiveProfileConfig(wg_config);
+            configureWireGuardProfiles(getPreferenceScreen(), prefs);
+            updateWireGuardStatus();
+            refreshResearchModeSummary();
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if ("pcap_record_size".equals(name) || "pcap_file_size".equals(name)) {
+            if ("pcap_record_size".equals(name))
+                getPreferenceScreen().findPreference(name)
+                        .setTitle(getString(R.string.setting_pcap_record_size, prefs.getString(name, "64")));
+            else
+                getPreferenceScreen().findPreference(name)
+                        .setTitle(getString(R.string.setting_pcap_file_size, prefs.getString(name, "2")));
+
+            ServiceSinkhole.setPcap(false, this);
+
+            File pcap_file = new File(getDir("data", MODE_PRIVATE), "netguard.pcap");
+            if (pcap_file.exists() && !pcap_file.delete())
+                Log.w(TAG, "Delete PCAP failed");
+
+            if (prefs.getBoolean("pcap", false))
+                ServiceSinkhole.setPcap(true, this);
+
+        } else if ("show_stats".equals(name))
+            ServiceSinkhole.reloadStats("changed " + name, this);
+
+        else if ("stats_frequency".equals(name))
+            getPreferenceScreen().findPreference(name)
+                    .setTitle(getString(R.string.setting_stats_frequency, prefs.getString(name, "1000")));
+
+        else if ("stats_samples".equals(name))
+            getPreferenceScreen().findPreference(name)
+                    .setTitle(getString(R.string.setting_stats_samples, prefs.getString(name, "90")));
+
+        else if ("hosts_last_download".equals(name)) {
+            String last = prefs.getString(name, null);
+            if (last != null) {
+                Preference pref = getPreferenceScreen().findPreference("hosts_download");
+                if (pref != null)
+                    pref.setSummary(getString(R.string.msg_update_last, last));
+            }
+        }
+
+        else if ("loglevel".equals(name))
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        else if ("domain_based_blocking".equals(name)) {
+            TrackerList.reloadTrackerData(this);
+            ServiceSinkhole.clearTrackerCaches();
+        }
+
+        // Android 17 blocks traffic to local network addresses unless the user
+        // grants ACCESS_LOCAL_NETWORK. Ask as soon as a setting starts pointing
+        // TrackerControl at the LAN — a custom DNS server, a local Secure DNS
+        // resolver, a WireGuard peer at home, or the full-tunnel tethering
+        // mode — rather than letting name resolution fail silently (#701).
+        // Asked at most once per visit: writing back a trimmed value re-enters
+        // this listener, and a second request while the dialog is up is dropped
+        // by the framework.
+        if (LocalNetworkAccess.isRelevantSetting(name))
+            // The new value may point somewhere else entirely; what we saw the
+            // old one reach says nothing about it.
+            LocalNetworkAccess.forgetObservations();
+
+        if (!requestedLocalNetwork && LocalNetworkAccess.isRelevantSetting(name)
+                && LocalNetworkAccess.isMissing(this)) {
+            requestedLocalNetwork = true;
+            requestPermissions(new String[] { LocalNetworkAccess.PERMISSION }, REQUEST_LOCAL_NETWORK);
+        }
+    }
+
+    static void configureDohEndpointPreference(EditTextPreference preference) {
+        preference.setOnPreferenceChangeListener((changedPreference, newValue) -> {
+            if (!(newValue instanceof String)) {
+                Toast.makeText(changedPreference.getContext(), R.string.msg_invalid_doh_endpoint,
+                        Toast.LENGTH_LONG).show();
+                return false;
+            }
+
+            String endpoint = ((String) newValue).trim();
+            if (!isValidDohEndpoint(endpoint)) {
+                Toast.makeText(changedPreference.getContext(), R.string.msg_invalid_doh_endpoint,
+                        Toast.LENGTH_LONG).show();
+                return false;
+            }
+
+            if (!endpoint.equals(newValue)) {
+                ((EditTextPreference) changedPreference).setText(endpoint);
+                return false;
+            }
+            return true;
+        });
+    }
+
+    private static boolean isValidDohEndpoint(String endpoint) {
+        if (TextUtils.isEmpty(endpoint) || containsWhitespace(endpoint))
+            return false;
+
+        try {
+            URI uri = new URI(endpoint);
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.isOpaque()
+                    || TextUtils.isEmpty(uri.getRawAuthority())
+                    || uri.getRawUserInfo() != null || uri.getRawFragment() != null
+                    || uri.getRawAuthority().indexOf('@') >= 0)
+                return false;
+
+            HttpUrl httpUrl = HttpUrl.parse(endpoint);
+            return httpUrl != null && httpUrl.isHttps() && !TextUtils.isEmpty(httpUrl.host())
+                    && !uri.getRawAuthority().endsWith(":");
+        } catch (URISyntaxException ex) {
+            return false;
+        }
+    }
+
+    private static boolean containsWhitespace(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char character = value.charAt(i);
+            if (Character.isWhitespace(character) || Character.isSpaceChar(character))
+                return true;
+        }
+        return false;
+    }
+
+    private CharSequence getWireGuardStatusSummary(SharedPreferences prefs) {
+        if (!prefs.getBoolean("wg_enabled", false))
+            return getString(R.string.summary_wg_status_off);
+
+        if (TextUtils.isEmpty(prefs.getString("wg_config", "")))
+            return getString(R.string.summary_wg_status_missing_config);
+
+        String error = net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.getLastError();
+        if (!TextUtils.isEmpty(error))
+            return getString(R.string.summary_wg_status_blocked, error);
+
+        if (net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.isRunning()) {
+            // The engine being up is not the same as a working tunnel:
+            // WireGuard handshakes lazily on the first packet, so "running"
+            // can mean "no peer has ever answered". Only claim "Connected"
+            // once an actual handshake has completed; otherwise the user sees
+            // "Connected" even with a wrong endpoint until traffic fails.
+            Long handshake = net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.latestHandshakeMillisOrNull();
+            if (handshake != null && handshake > 0)
+                return getString(R.string.summary_wg_status_connected);
+            return getString(R.string.summary_wg_status_handshaking);
+        }
+
+        return getString(R.string.summary_wg_status_starting);
+    }
+
+    private void updateWireGuardStatus() {
+        PreferenceScreen screen = getPreferenceScreen();
+        if (screen == null)
+            return;
+
+        CharSequence summary = getWireGuardStatusSummary(PreferenceManager.getDefaultSharedPreferences(this));
+        Preference pref = screen.findPreference("screen_wireguard");
+        if (pref != null)
+            pref.setSummary(summary);
+        pref = screen.findPreference("wg_status");
+        if (pref != null)
+            pref.setSummary(summary);
+    }
+
+    private void updateBlockingModeSummary(Preference pref, String mode) {
+        if (BlockingMode.MODE_MINIMAL.equals(mode))
+            pref.setSummary(R.string.summary_blocking_mode_minimal);
+        else if (BlockingMode.MODE_STRICT.equals(mode))
+            pref.setSummary(R.string.summary_blocking_mode_strict);
+        else
+            pref.setSummary(R.string.summary_blocking_mode_standard);
+    }
+
+    // SNI research mode reassembles the ClientHello on a per-flow session that
+    // only exists for directly-routed traffic (see handle_ip in ip.c): a flow
+    // the remote VPN tunnels never gets one, so research mode silently
+    // collects nothing for it. Say so on the Research preference itself,
+    // where sni_enabled is actually toggled, rather than on blocking_mode.
+    private void updateResearchModeSummary(Preference pref) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        String base = getString(R.string.summary_log_logcat);
+        if (prefs.getBoolean("sni_enabled", false) &&
+                prefs.getBoolean("wg_enabled", false) &&
+                !TextUtils.isEmpty(prefs.getString("wg_config", null)))
+            pref.setSummary(base + " " + getString(R.string.summary_sni_wg_note));
+        else
+            pref.setSummary(base);
+    }
+
+    // Re-derives the Research preference summary after a preference other than
+    // log_logcat itself changed the SNI-under-WireGuard note's condition
+    // (sni_enabled, wg_enabled, wg_config).
+    private void refreshResearchModeSummary() {
+        Preference pref = getPreferenceScreen().findPreference("log_logcat");
+        if (pref != null)
+            updateResearchModeSummary(pref);
+    }
+
+    private void setTrackerProtectionForAll(boolean enabled) {
+        SharedPreferences tracker_protect = getSharedPreferences("tracker_protect", Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = tracker_protect.edit();
+
+        // Deliberately leave tracker_essential alone: bulk disabling and then
+        // re-enabling tracker protection returns a minimal-only app to its
+        // previous MINIMAL_ONLY choice.
+        for (android.content.pm.PackageInfo pkg : Rule.getPackages(this))
+            editor.putBoolean(pkg.packageName, enabled);
+
+        editor.apply();
+        ServiceSinkhole.reload("bulk tracker protect changed", this, false);
+    }
+
+    private boolean checkPermissions(String name) {
+        PreferenceScreen screen = getPreferenceScreen();
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+
+        // Check if permission was revoked
+        if ((name == null || "disable_on_call".equals(name)) && prefs.getBoolean("disable_on_call", false))
+            if (!Util.hasPhoneStatePermission(this)) {
+                prefs.edit().putBoolean("disable_on_call", false).apply();
+                ((TwoStatePreference) screen.findPreference("disable_on_call")).setChecked(false);
+
+                requestPermissions(new String[] { Manifest.permission.READ_PHONE_STATE }, REQUEST_CALL);
+
+                if (name != null)
+                    return false;
+            }
+
+        return true;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+            @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        PreferenceScreen screen = getPreferenceScreen();
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+
+        boolean granted = (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED);
+
+        if (requestCode == REQUEST_CALL) {
+            prefs.edit().putBoolean("disable_on_call", granted).apply();
+            ((TwoStatePreference) screen.findPreference("disable_on_call")).setChecked(granted);
+        }
+
+        if (granted)
+            ServiceSinkhole.reload("permission granted", this, false);
+    }
+
+    private void checkAddress(String address, boolean allow_local)
+            throws IllegalArgumentException, UnknownHostException {
+        if (address != null)
+            address = address.trim();
+        if (TextUtils.isEmpty(address))
+            throw new IllegalArgumentException("Bad address");
+        if (!Util.isNumericAddress(address))
+            throw new IllegalArgumentException("Bad address");
+        if (!allow_local) {
+            InetAddress iaddr = InetAddress.getByName(address);
+            if (iaddr.isLoopbackAddress() || iaddr.isAnyLocalAddress())
+                throw new IllegalArgumentException("Bad address");
+        }
+    }
+
+    private void checkDomain(String address) throws IllegalArgumentException, UnknownHostException {
+        if (address != null)
+            address = address.trim();
+        if (TextUtils.isEmpty(address))
+            throw new IllegalArgumentException("Bad address");
+        if (Util.isNumericAddress(address))
+            throw new IllegalArgumentException("Bad address");
+        if (!PatternsCompat.DOMAIN_NAME.matcher(address).matches())
+            throw new IllegalArgumentException("Bad address");
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, final Intent data) {
+        Log.i(TAG, "onActivityResult request=" + requestCode + " result=" + requestCode + " ok="
+                + (resultCode == RESULT_OK));
+        if (requestCode == REQUEST_EXPORT) {
+            if (resultCode == RESULT_OK && data != null)
+                handleExport(data);
+
+        } else if (requestCode == REQUEST_IMPORT) {
+            if (resultCode == RESULT_OK && data != null)
+                handleImport(data);
+
+        } else {
+            Log.w(TAG, "Unknown activity result request=" + requestCode);
+            super.onActivityResult(requestCode, resultCode, data);
+        }
+    }
+
+    private Intent getIntentCreateExport() {
+        Intent intent;
+        intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*"); // text/xml
+        intent.putExtra(Intent.EXTRA_TITLE,
+                "trackercontrol_" + new SimpleDateFormat("yyyyMMdd", Locale.ROOT).format(new Date().getTime()) + ".xml");
+        return intent;
+    }
+
+    private Intent getIntentOpenExport() {
+        Intent intent;
+        intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*"); // text/xml
+        return intent;
+    }
+
+    // The one-shot export callback already checks running; executor migration
+    // is intentionally outside this focused lint change.
+    @SuppressLint("StaticFieldLeak")
+    private void handleExport(final Intent data) {
+        new AsyncTask<Object, Object, Throwable>() {
+            @Override
+            protected Throwable doInBackground(Object... objects) {
+                OutputStream out = null;
+                try {
+                    Uri target = data.getData();
+                    if (data.hasExtra("org.openintents.extra.DIR_PATH"))
+                        target = Uri.parse(target + "/trackercontrol_"
+                                + new SimpleDateFormat("yyyyMMdd", Locale.ROOT).format(new Date().getTime()) + ".xml");
+                    Log.i(TAG, "Writing URI=" + target);
+                    out = getContentResolver().openOutputStream(target);
+                    xmlExport(out);
+                    return null;
+                } catch (Throwable ex) {
+                    Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                    return ex;
+                } finally {
+                    if (out != null)
+                        try {
+                            out.close();
+                        } catch (IOException ex) {
+                            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                        }
+                }
+            }
+
+            @Override
+            protected void onPostExecute(Throwable ex) {
+                if (running) {
+                    if (ex == null)
+                        Toast.makeText(ActivitySettings.this, R.string.msg_completed, Toast.LENGTH_LONG).show();
+                    else
+                        Toast.makeText(ActivitySettings.this, ex.toString(), Toast.LENGTH_LONG).show();
+                }
+            }
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    }
+
+    // The one-shot import callback already checks running; executor migration
+    // is intentionally outside this focused lint change.
+    @SuppressLint("StaticFieldLeak")
+    private void handleImport(final Intent data) {
+        new AsyncTask<Object, Object, Throwable>() {
+            @Override
+            protected Throwable doInBackground(Object... objects) {
+                InputStream in = null;
+                try {
+                    Log.i(TAG, "Reading URI=" + data.getData());
+                    ContentResolver resolver = getContentResolver();
+                    String[] streamTypes = resolver.getStreamTypes(data.getData(), "*/*");
+                    String streamType = (streamTypes == null || streamTypes.length == 0 ? "*/*" : streamTypes[0]);
+                    AssetFileDescriptor descriptor = resolver.openTypedAssetFileDescriptor(data.getData(), streamType,
+                            null);
+                    in = descriptor.createInputStream();
+                    xmlImport(in);
+                    return null;
+                } catch (Throwable ex) {
+                    Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                    return ex;
+                } finally {
+                    if (in != null)
+                        try {
+                            in.close();
+                        } catch (IOException ex) {
+                            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                        }
+                }
+            }
+
+            @Override
+            protected void onPostExecute(Throwable ex) {
+                if (running) {
+                    if (ex == null) {
+                        Toast.makeText(ActivitySettings.this, R.string.msg_completed, Toast.LENGTH_LONG).show();
+                        ServiceSinkhole.reloadStats("import", ActivitySettings.this);
+                        // Update theme, request permissions
+                        recreate();
+                    } else
+                        Toast.makeText(ActivitySettings.this, ex.toString(), Toast.LENGTH_LONG).show();
+                }
+            }
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    }
+
+    private void xmlExport(OutputStream _out) throws IOException {
+        BufferedOutputStream out = new BufferedOutputStream(_out);
+
+        XmlSerializer serializer = Xml.newSerializer();
+        serializer.setOutput(out, "UTF-8");
+        serializer.startDocument(null, true);
+        serializer.setFeature("http://xmlpull.org/v1/doc/features.html#indent-output", true);
+        serializer.startTag(null, "trackercontrol");
+
+        serializer.startTag(null, "application");
+        xmlExport(PreferenceManager.getDefaultSharedPreferences(this), serializer);
+        serializer.endTag(null, "application");
+        out.flush();
+
+        serializer.startTag(null, "apply");
+        // A temporary pause must not be exported as a permanent exclusion.
+        xmlExport(getSharedPreferences("apply", Context.MODE_PRIVATE),
+                PausedApps.applyValuesWithoutPauses(this), serializer);
+        serializer.endTag(null, "apply");
+
+        serializer.startTag(null, "tracker_protect");
+        xmlExport(getSharedPreferences("tracker_protect", Context.MODE_PRIVATE), serializer);
+        serializer.endTag(null, "tracker_protect");
+
+        serializer.startTag(null, "tracker_essential");
+        xmlExport(getSharedPreferences("tracker_essential", Context.MODE_PRIVATE), serializer);
+        serializer.endTag(null, "tracker_essential");
+
+        serializer.startTag(null, Rule.PREF_WG_ROUTE);
+        xmlExport(getSharedPreferences(Rule.PREF_WG_ROUTE, Context.MODE_PRIVATE), serializer);
+        serializer.endTag(null, Rule.PREF_WG_ROUTE);
+
+        serializer.startTag(null, "notify");
+        xmlExport(getSharedPreferences("notify", Context.MODE_PRIVATE), serializer);
+        serializer.endTag(null, "notify");
+
+        serializer.startTag(null, "forward");
+        forwardExport(serializer);
+        serializer.endTag(null, "forward");
+
+        serializer.startTag(null, "blocklist");
+        xmlExport(getSharedPreferences(PREF_BLOCKLIST, Context.MODE_PRIVATE), serializer);
+        serializer.endTag(null, "blocklist");
+
+        serializer.endTag(null, "trackercontrol");
+        serializer.endDocument();
+        serializer.flush();
+
+        out.flush();
+    }
+
+    private void xmlExport(SharedPreferences prefs, XmlSerializer serializer) throws IOException {
+        xmlExport(prefs, null, serializer);
+    }
+
+    private void xmlExport(SharedPreferences prefs, Map<String, ?> overrides, XmlSerializer serializer) throws IOException {
+        Map<String, ?> settings = prefs.getAll();
+        if (overrides != null && !overrides.isEmpty()) {
+            Map<String, Object> merged = new HashMap<>(settings);
+            merged.putAll(overrides);
+            settings = merged;
+        }
+        for (String key : settings.keySet()) {
+            Object value = settings.get(key);
+
+            if ("imported".equals(key))
+                continue;
+
+            if (value instanceof Boolean) {
+                serializer.startTag(null, "setting");
+                serializer.attribute(null, "key", key);
+                serializer.attribute(null, "type", "boolean");
+                serializer.attribute(null, "value", value.toString());
+                serializer.endTag(null, "setting");
+
+            } else if (value instanceof Integer) {
+                serializer.startTag(null, "setting");
+                serializer.attribute(null, "key", key);
+                serializer.attribute(null, "type", "integer");
+                serializer.attribute(null, "value", value.toString());
+                serializer.endTag(null, "setting");
+
+            } else if (value instanceof String) {
+                serializer.startTag(null, "setting");
+                serializer.attribute(null, "key", key);
+                serializer.attribute(null, "type", "string");
+                serializer.attribute(null, "value", value.toString());
+                serializer.endTag(null, "setting");
+
+            } else if (value instanceof Set) {
+                Set<String> set = (Set<String>) value;
+
+                // InternetBlocklist: convert UIDs to package names
+                if (key.equals(InternetBlocklist.SHARED_PREFS_INTERNET_BLOCKLIST_APPS_KEY)) {
+                    Set<String> packageNames = new HashSet<>();
+                    PackageManager pm = getPackageManager();
+                    for (String uidStr : set) {
+                        try {
+                            int uid = Integer.parseInt(uidStr);
+                            String[] packages = Util.getPackagesForUid(pm, uid);
+                            if (packages != null) {
+                                Collections.addAll(packageNames, packages);
+                            }
+                        } catch (NumberFormatException e) {
+                            // Not a UID, so already stored under a package name:
+                            // an imported entry whose app is not installed yet.
+                            // The export is package-keyed anyway, so pass it
+                            // through rather than dropping the setting.
+                            packageNames.add(uidStr);
+                        }
+                    }
+
+                    // Key for package names
+                    serializer.startTag(null, "setting");
+                    serializer.attribute(null, "key", "INTERNET_BLOCKLIST_PACKAGES_KEY");
+                    serializer.attribute(null, "type", "set");
+                    serializer.attribute(null, "value", TextUtils.join("\n", packageNames));
+                    serializer.endTag(null, "setting");
+                } else if (key.equals(TrackerBlocklist.SHARED_PREFS_BLOCKLIST_APPS_KEY)) {
+                    // TrackerBlocklist: convert UIDs to package names
+                    Set<String> packageNames = new HashSet<>();
+                    PackageManager pm = getPackageManager();
+                    for (String uidStr : set) {
+                        try {
+                            int uid = Integer.parseInt(uidStr);
+                            String[] packages = Util.getPackagesForUid(pm, uid);
+                            if (packages != null) {
+                                for (String pkg : packages) {
+                                    packageNames.add(pkg);
+                                    exportTrackerSubset(prefs, serializer, uidStr, pkg);
+                                }
+                            }
+                        } catch (NumberFormatException e) {
+                            // Not a UID, so already stored under a package name:
+                            // an imported entry whose app is not installed yet.
+                            // Carry it and its subset through unchanged.
+                            packageNames.add(uidStr);
+                            exportTrackerSubset(prefs, serializer, uidStr, uidStr);
+                        }
+                    }
+
+                    // Key for package names list
+                    serializer.startTag(null, "setting");
+                    serializer.attribute(null, "key", "APPS_BLOCKLIST_PACKAGES_KEY");
+                    serializer.attribute(null, "type", "set");
+                    serializer.attribute(null, "value", TextUtils.join("\n", packageNames));
+                    serializer.endTag(null, "setting");
+
+                } else if (key.startsWith(TrackerBlocklist.SHARED_PREFS_BLOCKLIST_APPS_KEY + "_")) {
+                    // Skip the original UID-based per-app settings as we handled them above
+                    // This prevents duplication and confusion
+
+                } else {
+                    serializer.startTag(null, "setting");
+                    serializer.attribute(null, "key", key);
+                    serializer.attribute(null, "type", "set");
+                    serializer.attribute(null, "value", TextUtils.join("\n", set));
+                    serializer.endTag(null, "setting");
+                }
+
+            } else
+                Log.e(TAG, "Unknown key=" + key);
+        }
+    }
+
+    /**
+     * Write one app's tracker subset under its package-name key.
+     *
+     * @param prefs     Blocklist preferences
+     * @param serializer Serializer to write to
+     * @param storedKey The key the subset is stored under: a UID, or a package
+     *                  name for an entry that could not be resolved
+     * @param pkg       The package name to export it under
+     */
+    static void exportTrackerSubset(SharedPreferences prefs, XmlSerializer serializer,
+                                    String storedKey, String pkg) throws IOException {
+        // The key format for per-app settings is APPS_BLOCKLIST_APPS_KEY + "_" + uid
+        Set<String> perAppSettings = prefs.getStringSet(
+                TrackerBlocklist.SHARED_PREFS_BLOCKLIST_APPS_KEY + "_" + storedKey, null);
+        if (perAppSettings == null)
+            return;
+
+        serializer.startTag(null, "setting");
+        // Use a package-based key: APPS_BLOCKLIST_PACKAGES_KEY + "_" + packageName
+        serializer.attribute(null, "key", "APPS_BLOCKLIST_PACKAGES_KEY" + "_" + pkg);
+        serializer.attribute(null, "type", "set");
+        serializer.attribute(null, "value", TextUtils.join("\n", perAppSettings));
+        serializer.endTag(null, "setting");
+    }
+
+    private void forwardExport(XmlSerializer serializer) throws IOException {
+        try (Cursor cursor = DatabaseHelper.getInstance(this).getForwarding()) {
+            int colProtocol = cursor.getColumnIndex("protocol");
+            int colDPort = cursor.getColumnIndex("dport");
+            int colRAddr = cursor.getColumnIndex("raddr");
+            int colRPort = cursor.getColumnIndex("rport");
+            int colRUid = cursor.getColumnIndex("ruid");
+            while (cursor.moveToNext())
+                for (String pkg : getPackages(cursor.getInt(colRUid))) {
+                    serializer.startTag(null, "port");
+                    serializer.attribute(null, "pkg", pkg);
+                    serializer.attribute(null, "protocol", Integer.toString(cursor.getInt(colProtocol)));
+                    serializer.attribute(null, "dport", Integer.toString(cursor.getInt(colDPort)));
+                    serializer.attribute(null, "raddr", cursor.getString(colRAddr));
+                    serializer.attribute(null, "rport", Integer.toString(cursor.getInt(colRPort)));
+                    serializer.endTag(null, "port");
+                }
+        }
+    }
+
+    private String[] getPackages(int uid) {
+        if (uid == 0)
+            return new String[] { "root" };
+        else if (uid == 1013)
+            return new String[] { "mediaserver" };
+        else if (uid == 9999)
+            return new String[] { "nobody" };
+        else {
+            String pkgs[] = Util.getPackagesForUid(getPackageManager(), uid);
+            if (pkgs == null)
+                return new String[0];
+            else
+                return pkgs;
+        }
+    }
+
+    private void xmlImport(InputStream in) throws IOException, SAXException, ParserConfigurationException {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        boolean wasEnabled = prefs.getBoolean("enabled", false);
+        prefs.unregisterOnSharedPreferenceChangeListener(this);
+        prefs.edit().putBoolean("enabled", false).apply();
+        ServiceSinkhole.stop("import", this, false);
+
+        boolean applied = false;
+        try {
+            XMLReader reader = SAXParserFactory.newInstance().newSAXParser().getXMLReader();
+            XmlImportHandler handler = new XmlImportHandler(this);
+            reader.setContentHandler(handler);
+            reader.parse(new InputSource(in));
+
+            // Only now that the whole file has parsed successfully do we
+            // touch the forwarding rules, so a malformed file never leaves
+            // the old rules deleted with no replacement.
+            applied = true;
+            if (handler.forwardSeen)
+                DatabaseHelper.getInstance(this).replaceForwards(handler.forwards);
+
+            xmlImport(handler.application, prefs);
+            xmlImport(handler.apply, getSharedPreferences("apply", Context.MODE_PRIVATE));
+            xmlImport(handler.tracker_protect, getSharedPreferences("tracker_protect", Context.MODE_PRIVATE));
+            xmlImport(handler.tracker_essential, getSharedPreferences("tracker_essential", Context.MODE_PRIVATE));
+            xmlImport(handler.wg_route, getSharedPreferences(Rule.PREF_WG_ROUTE, Context.MODE_PRIVATE));
+            xmlImport(handler.notify, getSharedPreferences("notify", Context.MODE_PRIVATE));
+            xmlImport(handler.blocklist, getSharedPreferences(PREF_BLOCKLIST, Context.MODE_PRIVATE));
+
+            // Reload blocklist
+            TrackerBlocklist.getInstance(this).loadSettings(this);
+            InternetBlocklist.getInstance(this).loadSettings(this);
+
+            // Upgrade imported settings
+            ReceiverAutostart.upgrade(true, this);
+
+            // Reconcile imported apply preferences with auto-exclusions immediately,
+            // rather than waiting for the next process start.
+            BlockingMode.syncAutoExclusions(this);
+
+            DatabaseHelper.clearCache();
+
+            // Refresh UI
+            prefs.edit().putBoolean("imported", true).apply();
+        } catch (Throwable ex) {
+            if (applied) {
+                // Some stores were already overwritten, so the configuration
+                // is a mix of old and imported settings. Leave the VPN off
+                // rather than start it on a state nobody chose.
+                Log.w(TAG, "Import failed after applying; leaving disabled");
+            } else {
+                // Nothing was touched yet: restore the pre-import state, as a
+                // failed parse must not leave the VPN off when it was running.
+                prefs.edit().putBoolean("enabled", wasEnabled).apply();
+                if (wasEnabled)
+                    ServiceSinkhole.start("import", this);
+            }
+            throw ex;
+        } finally {
+            prefs.registerOnSharedPreferenceChangeListener(this);
+        }
+    }
+
+    private void xmlImport(Map<String, Object> settings, SharedPreferences prefs) {
+        SharedPreferences.Editor editor = prefs.edit();
+
+        // Clear existing setting
+        for (String key : prefs.getAll().keySet())
+            if (!"enabled".equals(key))
+                editor.remove(key);
+
+        // Apply new settings
+        for (String key : settings.keySet()) {
+            Object value = settings.get(key);
+            if (value instanceof Boolean)
+                editor.putBoolean(key, (Boolean) value);
+            else if (value instanceof Integer)
+                editor.putInt(key, (Integer) value);
+            else if (value instanceof String)
+                editor.putString(key, (String) value);
+            else if (value instanceof Set)
+                editor.putStringSet(key, (Set<String>) value);
+            else
+                Log.e(TAG, "Unknown type=" + value.getClass());
+        }
+
+        editor.apply();
+    }
+
+    static Set<String> resolveImportedUids(Context context, String value) {
+        Set<String> uids = new HashSet<>();
+        if (TextUtils.isEmpty(value))
+            return uids;
+
+        for (String pkg : value.split("\n")) {
+            if (TextUtils.isEmpty(pkg))
+                continue;
+
+            Integer uid = PackageUids.resolve(context, pkg);
+            if (uid == null) {
+                // Retain the package name so a later install can resolve it.
+                uids.add(pkg);
+                Log.w(TAG, "Retaining unresolved package during import: " + pkg);
+            } else {
+                uids.add(Integer.toString(uid));
+            }
+        }
+        return uids;
+    }
+
+    private class XmlImportHandler extends DefaultHandler {
+        private Context context;
+        public boolean enabled = false;
+        public Map<String, Object> application = new HashMap<>();
+        public Map<String, Object> wifi = new HashMap<>();
+        public Map<String, Object> mobile = new HashMap<>();
+        public Map<String, Object> screen_wifi = new HashMap<>();
+        public Map<String, Object> screen_other = new HashMap<>();
+        public Map<String, Object> roaming = new HashMap<>();
+        public Map<String, Object> apply = new HashMap<>();
+        public Map<String, Object> tracker_protect = new HashMap<>();
+        public Map<String, Object> tracker_essential = new HashMap<>();
+        public Map<String, Object> wg_route = new HashMap<>();
+        public Map<String, Object> notify = new HashMap<>();
+        public Map<String, Object> blocklist = new HashMap<>();
+        // Forwarding rules parsed from the file: collected here rather than
+        // written straight to the database, so a malformed <port> further
+        // down never leaves the old rules deleted with no replacement.
+        public boolean forwardSeen = false;
+        public List<Forward> forwards = new ArrayList<>();
+        private Map<String, Object> current = null;
+
+        public XmlImportHandler(Context context) {
+            this.context = context;
+        }
+
+        @Override
+        public void startElement(String uri, String localName, String qName, Attributes attributes) {
+            if (qName.equals("netguard")
+                    || qName.equals("trackercontrol"))
+                ; // Ignore
+
+            else if (qName.equals("application"))
+                current = application;
+
+            else if (qName.equals("wifi"))
+                current = wifi;
+
+            else if (qName.equals("mobile"))
+                current = mobile;
+
+            else if (qName.equals("screen_wifi"))
+                current = screen_wifi;
+
+            else if (qName.equals("screen_other"))
+                current = screen_other;
+
+            else if (qName.equals("roaming"))
+                current = roaming;
+
+
+
+            else if (qName.equals("apply"))
+                current = apply;
+
+            else if (qName.equals("tracker_protect"))
+                current = tracker_protect;
+            else if (qName.equals("tracker_essential"))
+                current = tracker_essential;
+            else if (qName.equals(Rule.PREF_WG_ROUTE))
+                current = wg_route;
+
+            else if (qName.equals("notify"))
+                current = notify;
+
+            else if (qName.equals("forward")) {
+                current = null;
+                forwardSeen = true;
+
+            } else if (qName.equals("blocklist"))
+                current = blocklist;
+
+            else if (qName.equals("setting")) {
+                String key = attributes.getValue("key");
+                String type = attributes.getValue("type");
+                String value = attributes.getValue("value");
+
+                if (current == null)
+                    Log.e(TAG, "No current key=" + key);
+                else {
+                    if ("enabled".equals(key))
+                        enabled = Boolean.parseBoolean(value);
+                    else {
+                        if (current == application) {
+                            if ("hosts_last_import".equals(key) || "hosts_last_download".equals(key))
+                                return;
+                        }
+
+                        // InternetBlocklist: convert package names back to UIDs
+                        if ("INTERNET_BLOCKLIST_PACKAGES_KEY".equals(key) && "set".equals(type)) {
+                            Set<String> uids = resolveImportedUids(context, value);
+                            // Store under original key
+                            String originalKey = InternetBlocklist.SHARED_PREFS_INTERNET_BLOCKLIST_APPS_KEY;
+                            current.put(originalKey, uids);
+                            return;
+                        }
+
+                        // TrackerBlocklist: convert package names back to UIDs
+                        if ("APPS_BLOCKLIST_PACKAGES_KEY".equals(key) && "set".equals(type)) {
+                            Set<String> uids = resolveImportedUids(context, value);
+                            // Store under original key
+                            String originalKey = TrackerBlocklist.SHARED_PREFS_BLOCKLIST_APPS_KEY;
+                            current.put(originalKey, uids);
+                            return;
+                        }
+
+                        // TrackerBlocklist: per-app settings
+                        if (key.startsWith("APPS_BLOCKLIST_PACKAGES_KEY_") && "set".equals(type)) {
+                            // Extract package name
+                            String pkg = key.substring("APPS_BLOCKLIST_PACKAGES_KEY_".length());
+                            Set<String> set = new HashSet<>();
+                            if (!TextUtils.isEmpty(value))
+                                for (String s : value.split("\n"))
+                                    set.add(s);
+
+                            Integer uid = PackageUids.resolve(context, pkg);
+                            if (uid == null) {
+                                // Retain the package-name key so a later install can resolve it.
+                                current.put(TrackerBlocklist.SHARED_PREFS_BLOCKLIST_APPS_KEY + "_" + pkg, set);
+                                Log.w(TAG, "Retaining unresolved package during import of settings: " + pkg);
+                            } else {
+                                // Store under original UID-based key
+                                current.put(TrackerBlocklist.SHARED_PREFS_BLOCKLIST_APPS_KEY + "_" + uid, set);
+                            }
+                            return;
+                        }
+
+                        if ("boolean".equals(type))
+                            current.put(key, Boolean.parseBoolean(value));
+                        else if ("integer".equals(type))
+                            current.put(key, Integer.parseInt(value));
+                        else if ("string".equals(type))
+                            current.put(key, value);
+                        else if ("set".equals(type)) {
+                            Set<String> set = new HashSet<>();
+                            if (!TextUtils.isEmpty(value))
+                                for (String s : value.split("\n"))
+                                    set.add(s);
+                            current.put(key, set);
+                        } else
+                            Log.e(TAG, "Unknown type key=" + key);
+                    }
+                }
+
+            } else if (qName.equals("port")) {
+                String pkg = attributes.getValue("pkg");
+                int protocol = Integer.parseInt(attributes.getValue("protocol"));
+                int dport = Integer.parseInt(attributes.getValue("dport"));
+                String raddr = attributes.getValue("raddr");
+                int rport = Integer.parseInt(attributes.getValue("rport"));
+
+                try {
+                    // Re-derive as the numeric address: the imported file is
+                    // untrusted input, and the native side copies raddr into a
+                    // fixed INET6_ADDRSTRLEN buffer. A blank address is left
+                    // alone: native treats it as "no redirect", and resolving
+                    // it would turn an inert exported rule into a live
+                    // redirect to loopback on re-import.
+                    if (!TextUtils.isEmpty(raddr))
+                        raddr = InetAddress.getByName(raddr).getHostAddress();
+                    int uid = getUid(pkg);
+
+                    Forward forward = new Forward();
+                    forward.protocol = protocol;
+                    forward.dport = dport;
+                    forward.raddr = raddr;
+                    forward.rport = rport;
+                    forward.ruid = uid;
+                    forwards.add(forward);
+                } catch (PackageManager.NameNotFoundException ex) {
+                    Log.w(TAG, "Package not found pkg=" + pkg);
+                } catch (java.io.IOException ex) {
+                    Log.w(TAG, "Invalid forward raddr=" + raddr + ": " + ex);
+                }
+
+            } else
+                Log.e(TAG, "Unknown element qname=" + qName);
+        }
+
+        private int getUid(String pkg) throws PackageManager.NameNotFoundException {
+            if ("root".equals(pkg))
+                return 0;
+            else if ("android.media".equals(pkg))
+                return 1013;
+            else if ("android.multicast".equals(pkg))
+                return 1020;
+            else if ("android.gps".equals(pkg))
+                return 1021;
+            else if ("android.dns".equals(pkg))
+                return 1051;
+            else if ("nobody".equals(pkg))
+                return 9999;
+            else
+                return getPackageManager().getApplicationInfo(pkg, 0).uid;
+        }
+    }
+}

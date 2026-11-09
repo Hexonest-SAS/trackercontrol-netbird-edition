@@ -1,0 +1,1 @@
+TrackerControl seuraa ja estää sovellusten salattua tietojenkeruuta.

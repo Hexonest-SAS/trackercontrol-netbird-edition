@@ -1,0 +1,410 @@
+/*
+ * TrackerControl is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * TrackerControl is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with TrackerControl. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+package net.kollnig.missioncontrol.details;
+
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.text.TextUtils;
+import android.view.MenuItem;
+import android.view.View;
+
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.compose.ui.platform.ComposeView;
+import androidx.work.Data;
+import androidx.work.WorkInfo;
+
+import com.google.android.material.appbar.AppBarLayout;
+import com.google.android.material.appbar.MaterialToolbar;
+
+import net.kollnig.missioncontrol.DetailsActivity;
+import net.kollnig.missioncontrol.R;
+import net.kollnig.missioncontrol.analysis.TrackerAnalysisManager;
+import net.kollnig.missioncontrol.analysis.TrackerAnalysisWorker;
+import net.kollnig.missioncontrol.analysis.TrackerSignatureManager;
+import net.kollnig.missioncontrol.data.ExodusTracker;
+import net.kollnig.missioncontrol.ui.compose.LibraryRow;
+import net.kollnig.missioncontrol.ui.compose.LibrariesProgress;
+import net.kollnig.missioncontrol.ui.compose.LibrariesResult;
+import net.kollnig.missioncontrol.ui.compose.LibrariesScreen;
+import net.kollnig.missioncontrol.ui.compose.LibrariesScreenCallbacks;
+import net.kollnig.missioncontrol.ui.compose.LibrariesScreenController;
+import net.kollnig.missioncontrol.ui.compose.LibrariesScreenModel;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import eu.faircode.netguard.Util;
+
+/**
+ * The static tracker-library report for one app.
+ *
+ * This is a separate screen from the Trackers tab on purpose: library detection
+ * reads the app's code, while the tracker list on that tab is derived from
+ * observed DNS traffic. They answer different questions and only the latter is
+ * blockable, so mixing them into one scroll made both harder to read.
+ */
+public class LibrariesActivity extends AppCompatActivity {
+    private String appPackageName;
+    private String appName;
+
+    private TrackerAnalysisManager manager;
+
+    private LibrariesScreenController screenController;
+    private final Map<String, String> trackerWebsites = new HashMap<>();
+    private final ExecutorService trackerMetadataExecutor = Executors.newSingleThreadExecutor();
+    private boolean trackerMetadataLoading = true;
+    private String currentTrackerResult;
+    private boolean currentTrackerResultStale;
+    private boolean trackerResultVisible;
+    private String currentError;
+    private boolean analysisProgressVisible;
+    private String analysisProgressText;
+    private Integer analysisProgressPercent;
+    private boolean analyzeEnabled = true;
+    private int analyzeText = R.string.analyze_tracker_libraries;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_libraries);
+
+        Intent intent = getIntent();
+        appPackageName = intent.getStringExtra(DetailsActivity.INTENT_EXTRA_APP_PACKAGENAME);
+        appName = intent.getStringExtra(DetailsActivity.INTENT_EXTRA_APP_NAME);
+        if (TextUtils.isEmpty(appPackageName)) {
+            finish();
+            return;
+        }
+        if (TextUtils.isEmpty(appName))
+            appName = appPackageName;
+
+        MaterialToolbar toolbar = findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+            getSupportActionBar().setDisplayShowTitleEnabled(false);
+        }
+        toolbar.setTitle(R.string.libraries_title);
+        toolbar.setSubtitle(appName);
+
+        manager = TrackerAnalysisManager.getInstance(this);
+        ComposeView composeLibraries = findViewById(R.id.composeLibraries);
+        screenController = LibrariesScreen.install(
+                composeLibraries,
+                buildScreenModel(),
+                new LibrariesScreenCallbacks() {
+                    @Override
+                    public void onAnalyse() {
+                        manager.startAnalysis(appPackageName);
+                    }
+
+                    @Override
+                    public void onWebsiteClick(String website) {
+                        openTrackerWebsite(website);
+                    }
+                });
+
+        showCachedResult();
+        loadTrackerWebsites();
+
+        manager.getWorkInfoByPackageLiveData(appPackageName)
+                .observe(this, this::onWorkInfoChanged);
+
+        AppBarLayout appBar = findViewById(R.id.appbar);
+        final int appBarInitialTop = appBar.getPaddingTop();
+        ViewCompat.setOnApplyWindowInsetsListener(appBar, (v, insets) -> {
+            Insets sysBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(v.getPaddingLeft(), appBarInitialTop + sysBars.top,
+                    v.getPaddingRight(), v.getPaddingBottom());
+            return insets;
+        });
+
+        final int composeInitialBottom = composeLibraries.getPaddingBottom();
+        ViewCompat.setOnApplyWindowInsetsListener(composeLibraries, (v, insets) -> {
+            Insets sysBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(v.getPaddingLeft(), v.getPaddingTop(), v.getPaddingRight(),
+                    composeInitialBottom + sysBars.bottom);
+            return insets;
+        });
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == android.R.id.home) {
+            finish();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    @Override
+    protected void onDestroy() {
+        trackerMetadataExecutor.shutdownNow();
+        super.onDestroy();
+    }
+
+    private void showCachedResult() {
+        String cachedResults = manager.getCachedResult(appPackageName);
+        if (cachedResults == null) {
+            updateScreenModel();
+            return;
+        }
+
+        boolean stale = manager.isCacheStale(appPackageName);
+        currentTrackerResult = cachedResults;
+        currentTrackerResultStale = stale;
+        currentError = null;
+        trackerResultVisible = true;
+        if (stale)
+            analyzeText = R.string.update_analysis;
+        updateScreenModel();
+    }
+
+    private void loadTrackerWebsites() {
+        trackerMetadataExecutor.execute(() -> {
+            Map<String, String> websites = new HashMap<>();
+            List<ExodusTracker> trackers = new TrackerSignatureManager(this).getTrackers();
+            if (trackers != null) {
+                for (ExodusTracker tracker : trackers) {
+                    if (TextUtils.isEmpty(tracker.getName())
+                            || TextUtils.isEmpty(tracker.getWebsite()))
+                        continue;
+                    websites.put(normalizeTrackerName(tracker.getName()), tracker.getWebsite());
+                }
+            }
+
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed())
+                    return;
+                trackerWebsites.clear();
+                trackerWebsites.putAll(websites);
+                trackerMetadataLoading = false;
+                if (trackerResultVisible && currentTrackerResult != null)
+                    renderTrackerResult(currentTrackerResult, currentTrackerResultStale);
+                else
+                    updateScreenModel();
+            });
+        });
+    }
+
+    private void renderTrackerResult(String result, boolean stale) {
+        currentTrackerResult = result;
+        currentTrackerResultStale = stale;
+        currentError = null;
+        trackerResultVisible = true;
+        updateScreenModel();
+    }
+
+    private void hideTrackerResult() {
+        trackerResultVisible = false;
+        currentError = null;
+    }
+
+    private void openTrackerWebsite(String website) {
+        Uri uri = getWebsiteUri(website);
+        if (uri == null)
+            return;
+
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, uri));
+        } catch (ActivityNotFoundException ignored) {
+            // A browser is optional; keep the detected library visible.
+        }
+    }
+
+    private static Uri getWebsiteUri(String website) {
+        if (TextUtils.isEmpty(website))
+            return null;
+
+        Uri uri = Uri.parse(website);
+        String scheme = uri.getScheme();
+        if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
+            return null;
+        return uri;
+    }
+
+    private static List<String> parseTrackerNames(String result) {
+        List<String> trackerNames = new ArrayList<>();
+        if (result == null)
+            return trackerNames;
+
+        for (String line : result.split("\\n")) {
+            String candidate = line.trim();
+            if (!candidate.startsWith("•"))
+                continue;
+
+            String name = candidate.substring(1).trim();
+            if (!name.isEmpty())
+                trackerNames.add(name);
+        }
+        return trackerNames;
+    }
+
+    private static String normalizeTrackerName(String name) {
+        return name.replaceAll("[°²?µ]", "")
+                .trim()
+                .toLowerCase(Locale.ROOT);
+    }
+
+    private void onWorkInfoChanged(List<WorkInfo> workInfoList) {
+        if (workInfoList == null || workInfoList.isEmpty()) {
+            updateAnalysisState(null);
+            return;
+        }
+
+        // Prefer work that is still running over the most recent finished run.
+        WorkInfo activeWork = null;
+        for (WorkInfo info : workInfoList) {
+            if (!info.getState().isFinished()) {
+                activeWork = info;
+                break;
+            }
+        }
+        if (activeWork == null)
+            activeWork = workInfoList.get(0);
+
+        updateAnalysisState(activeWork);
+    }
+
+    private void updateAnalysisState(WorkInfo workInfo) {
+        if (workInfo == null) {
+            analysisProgressVisible = false;
+            analysisProgressText = null;
+            analysisProgressPercent = null;
+            analyzeEnabled = true;
+            updateScreenModel();
+            return;
+        }
+
+        switch (workInfo.getState()) {
+            case ENQUEUED:
+            case BLOCKED:
+                analyzeEnabled = false;
+                analysisProgressVisible = true;
+                analysisProgressText = getString(R.string.analysis_queued);
+                analysisProgressPercent = null;
+                hideTrackerResult();
+                updateScreenModel();
+                break;
+
+            case RUNNING:
+                analyzeEnabled = false;
+                analysisProgressVisible = true;
+                hideTrackerResult();
+
+                Data progress = workInfo.getProgress();
+                int percent = progress.getInt(TrackerAnalysisWorker.KEY_PROGRESS, 0);
+                analysisProgressPercent = percent;
+                analysisProgressText = getString(R.string.analyzing_classes_progress, percent);
+                updateScreenModel();
+                break;
+
+            case SUCCEEDED:
+                analysisProgressVisible = false;
+                analysisProgressText = null;
+                analysisProgressPercent = null;
+                analyzeEnabled = true;
+                analyzeText = R.string.analyze_tracker_libraries;
+
+                String result = workInfo.getOutputData().getString(TrackerAnalysisWorker.KEY_RESULT);
+                if (result != null) {
+                    renderTrackerResult(result, false);
+                } else {
+                    // A finished run this screen did not start; fall back to the cache.
+                    showCachedResult();
+                }
+                updateScreenModel();
+                break;
+
+            case FAILED:
+                analysisProgressVisible = false;
+                analysisProgressText = null;
+                analysisProgressPercent = null;
+                analyzeEnabled = true;
+                hideTrackerResult();
+
+                String error = workInfo.getOutputData().getString(TrackerAnalysisWorker.KEY_ERROR);
+                currentError = error;
+                updateScreenModel();
+                break;
+
+            case CANCELLED:
+                analysisProgressVisible = false;
+                analysisProgressText = null;
+                analysisProgressPercent = null;
+                analyzeEnabled = true;
+                showCachedResult();
+                updateScreenModel();
+                break;
+        }
+    }
+
+    private void updateScreenModel() {
+        if (screenController != null)
+            screenController.update(buildScreenModel());
+    }
+
+    private LibrariesScreenModel buildScreenModel() {
+        String explanation = getString(Util.isPlayStoreInstall()
+                ? R.string.trackers_static_explanation_playstore
+                : R.string.trackers_static_explanation);
+
+        LibrariesResult result = null;
+        if (currentError != null) {
+            result = new LibrariesResult(Collections.emptyList(), currentError, null);
+        } else if (trackerResultVisible && currentTrackerResult != null) {
+            List<String> trackerNames = parseTrackerNames(currentTrackerResult);
+            List<LibraryRow> libraries = new ArrayList<>();
+            for (String trackerName : trackerNames) {
+                Uri website = getWebsiteUri(
+                        trackerWebsites.get(normalizeTrackerName(trackerName)));
+                libraries.add(new LibraryRow(trackerName,
+                        website == null ? null : website.toString()));
+            }
+
+            String rawResult = trackerNames.isEmpty()
+                    ? getString(R.string.detected_trackers, currentTrackerResult)
+                    : null;
+            String disclaimer = getString(R.string.trackers_static_disclaimer);
+            if (currentTrackerResultStale)
+                disclaimer += getString(R.string.analysis_outdated_version);
+            result = new LibrariesResult(Collections.unmodifiableList(libraries), rawResult,
+                    disclaimer);
+        }
+
+        LibrariesProgress progress = analysisProgressVisible
+                ? new LibrariesProgress(analysisProgressText, analysisProgressPercent)
+                : null;
+        return new LibrariesScreenModel(
+                explanation,
+                result,
+                trackerMetadataLoading,
+                progress,
+                getString(analyzeText),
+                analyzeEnabled);
+    }
+}

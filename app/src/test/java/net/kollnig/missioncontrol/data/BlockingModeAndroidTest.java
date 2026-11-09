@@ -1,0 +1,116 @@
+/*
+ * TrackerControl is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * TrackerControl is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * Copyright © 2026
+ */
+
+package net.kollnig.missioncontrol.data;
+
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import org.junit.Test;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+
+public class BlockingModeAndroidTest {
+
+    @Test
+    public void bundledExcludedAppsAssetContainsRepresentativePackages() throws Exception {
+        Set<String> excludedApps = BlockingModeLogic.parseExcludedAppsJson(readExcludedAppsAsset());
+        Set<String> browserApps = BlockingModeLogic.parseBrowserAppsJson(readExcludedAppsAsset());
+
+        assertTrue(browserApps.contains("com.android.chrome"));
+        assertFalse(excludedApps.contains("com.android.chrome"));
+        assertTrue(excludedApps.contains("com.whatsapp"));
+        assertFalse(excludedApps.contains("com.example.app"));
+    }
+
+    @Test
+    public void syncAutoExclusionsUsesRealExcludedAppsAsset() throws Exception {
+        Set<String> excludedApps = BlockingModeLogic.parseExcludedAppsJson(readExcludedAppsAsset());
+        Map<String, Boolean> applyPrefs = new HashMap<>();
+        applyPrefs.put("manual.false", false);
+
+        BlockingModeLogic.ExclusionSyncResult initialResult = BlockingModeLogic.syncVpnExclusions(
+                excludedApps,
+                applyPrefs,
+                Collections.emptySet());
+
+        assertFalse(initialResult.applyFalsePackages.contains("com.android.chrome"));
+        assertTrue(initialResult.applyFalsePackages.contains("com.whatsapp"));
+        assertFalse(initialResult.applyRemovals.contains("manual.false"));
+
+        applyPrefs.put("com.whatsapp", false);
+        BlockingModeLogic.ExclusionSyncResult stableResult = BlockingModeLogic.syncVpnExclusions(
+                Set.of("com.whatsapp"),
+                applyPrefs,
+                Set.of("com.whatsapp"));
+
+        assertTrue(stableResult.applyFalsePackages.isEmpty());
+        assertTrue(stableResult.applyRemovals.isEmpty());
+        assertTrue(stableResult.autoExcludedApps.contains("com.whatsapp"));
+
+        BlockingModeLogic.ExclusionSyncResult restoredResult = BlockingModeLogic.syncVpnExclusions(
+                Collections.emptySet(),
+                applyPrefs,
+                stableResult.autoExcludedApps);
+
+        assertTrue(restoredResult.applyRemovals.contains("com.whatsapp"));
+        assertFalse(restoredResult.applyRemovals.contains("manual.false"));
+        assertTrue(restoredResult.autoExcludedApps.isEmpty());
+    }
+
+    @Test
+    public void explicitVpnInclusionWithRealExcludedAppsStopsAutoManagement() throws Exception {
+        Set<String> excludedApps = BlockingModeLogic.parseExcludedAppsJson(readExcludedAppsAsset());
+        assertTrue(excludedApps.contains("com.whatsapp"));
+
+        Map<String, Boolean> applyPrefs = new HashMap<>();
+        applyPrefs.put("com.whatsapp", true);
+
+        BlockingModeLogic.ExclusionSyncResult result = BlockingModeLogic.syncVpnExclusions(
+                Set.of("com.whatsapp"),
+                applyPrefs,
+                Set.of("com.whatsapp"));
+
+        assertTrue(result.applyFalsePackages.isEmpty());
+        assertTrue(result.applyRemovals.isEmpty());
+        assertFalse(result.autoExcludedApps.contains("com.whatsapp"));
+    }
+
+    @Test
+    public void explicitTrackerProtectionOverridesMinimalModeDefaults() {
+        assertTrue(BlockingMode.resolveTrackerProtection(false, null));
+        assertFalse(BlockingMode.resolveTrackerProtection(true, null));
+        assertFalse(BlockingMode.resolveTrackerProtection(false, false));
+        assertTrue(BlockingMode.resolveTrackerProtection(true, true));
+    }
+
+    private static String readExcludedAppsAsset() throws IOException {
+        return new String(Files.readAllBytes(assetPath("ddg-excluded-apps.json")), StandardCharsets.UTF_8);
+    }
+
+    private static Path assetPath(String assetName) {
+        Path moduleRelative = Path.of("src", "main", "assets", assetName);
+        if (Files.exists(moduleRelative))
+            return moduleRelative;
+
+        return Path.of("app", "src", "main", "assets", assetName);
+    }
+}

@@ -1,0 +1,687 @@
+#include <jni.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <time.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <dirent.h>
+#include <poll.h>
+#include <sys/types.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/epoll.h>
+#include <dlfcn.h>
+#include <sys/stat.h>
+#include <sys/resource.h>
+
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <netinet/in6.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
+#include <netinet/udp.h>
+#include <netinet/tcp.h>
+#include <netinet/ip_icmp.h>
+#include <netinet/icmp6.h>
+
+#include <android/log.h>
+#include <sys/system_properties.h>
+
+#include "tcdns.h"
+#include "dns_frame.h" // libc-only: no JNI/session dependencies
+#include "udp_state.h"
+
+#define TAG "TrackerControl.JNI"
+
+// #define PROFILE_JNI 5
+// #define PROFILE_MEMORY
+
+#define EPOLL_TIMEOUT 3600 // seconds
+#define EPOLL_EVENTS 20
+#define EPOLL_MIN_CHECK 100 // milliseconds
+#define TCP_WINDOW_PROBE_MAX 5000 // milliseconds
+
+#define TUN_YIELD 10 // packets
+
+#define ICMP4_MAXMSG (IP_MAXPACKET - 20 - 8) // bytes (socket)
+#define ICMP6_MAXMSG (IPV6_MAXPACKET - 40 - 8) // bytes (socket)
+#define UDP4_MAXMSG (IP_MAXPACKET - 20 - 8) // bytes (socket)
+#define UDP6_MAXMSG (IPV6_MAXPACKET - 40 - 8) // bytes (socket)
+
+// Optional TCP MSS clamp for the SYN/SYN-ACK we inject into the tun. The tun advertises
+// an oversized MTU (get_mtu() == 10000), so the derived MSS (~9960) would let a
+// peer emit segments far larger than any real upstream path (cellular/WireGuard
+// are typically <= 1500). Because handle_icmp() drops the ICMPv4 "fragmentation
+// needed" / ICMPv6 "packet too big" messages that Path-MTU-Discovery relies on,
+// such oversized segments can black-hole - notably for tethered clients (#478).
+// Clamping to a conservative value keeps every segment small enough to traverse
+// typical constrained paths without depending on PMTUD. This is enabled only
+// by the tethering compatibility setting. Heuristic; verify on device before
+// relying on the exact value.
+#define TCP_MSS_CLAMP 1360 // bytes
+
+#define ICMP_TIMEOUT 5 // seconds
+
+#define UDP_TIMEOUT_53 15 // seconds
+#define UDP_TIMEOUT_ANY 300 // seconds
+#define UDP_KEEP_TIMEOUT 60 // seconds
+#define UDP_BLOCKED_MAX 256 // bounded negative cache, separate from active sockets
+#define UDP_YIELD 10 // packets
+
+#define TCP_INIT_TIMEOUT 20 // seconds ~net.inet.tcp.keepinit
+#define TCP_IDLE_TIMEOUT 3600 // seconds ~net.inet.tcp.keepidle
+#define TCP_CLOSE_TIMEOUT 20 // seconds
+#define TCP_KEEP_TIMEOUT 300 // seconds
+// https://en.wikipedia.org/wiki/Maximum_segment_lifetime
+
+#define SESSION_LIMIT 40 // percent
+#define SESSION_MAX (1024 * SESSION_LIMIT / 100) // number
+
+#define SEND_BUF_DEFAULT 163840 // bytes
+
+#define UID_MAX_AGE 30000 // milliseconds
+
+// Upper bound on the number of /proc/net rows cached by get_uid_sub(), which
+// allocates the whole table once. Kept modest because a cache hit is a linear
+// scan – fine at this size, but a much bigger cap would want a proper index.
+#define UID_CACHE_MAX 1024
+
+#define SOCKS5_NONE 1
+#define SOCKS5_HELLO 2
+#define SOCKS5_AUTH 3
+#define SOCKS5_CONNECT 4
+#define SOCKS5_CONNECTED 5
+#define SOCKS5_MESSAGE_MAX 263
+
+struct context {
+    pthread_mutex_t lock;
+    int pipefds[2];
+    int stopping;
+    int sdk;
+    jboolean tcp_mss_clamp;
+    struct ng_session *ng_session;
+};
+
+struct arguments {
+    JNIEnv *env;
+    jobject instance;
+    int tun;
+    jboolean fwd53;
+    jint rcode;
+    struct context *ctx;
+};
+
+struct allowed {
+    char raddr[INET6_ADDRSTRLEN + 1];
+    uint16_t rport; // host notation
+};
+
+// Writes one packet to the active WireGuard socketpair while protecting the
+// descriptor from concurrent stop/close. Returns 1 when WireGuard claimed the
+// packet (including a failed write, which must be dropped) and 0 when inactive.
+int write_wireguard_packet(const void *packet, size_t length,
+                           ssize_t *written, int *write_errno);
+
+
+struct segment {
+    uint32_t seq;
+    uint16_t len;
+    uint16_t sent;
+    int psh;
+    uint8_t *data;
+    struct segment *next;
+};
+
+struct icmp_session {
+    time_t time;
+    jint uid;
+    int version;
+
+    union {
+        __be32 ip4; // network notation
+        struct in6_addr ip6;
+    } saddr;
+
+    union {
+        __be32 ip4; // network notation
+        struct in6_addr ip6;
+    } daddr;
+
+    uint16_t id;
+
+    uint8_t stop;
+};
+
+struct udp_session {
+    time_t time;
+    jint uid;
+    int version;
+    uint16_t mss;
+
+    int resolved_version;
+    union {
+        __be32 ip4;
+        struct in6_addr ip6;
+    } resolved_addr;
+    __be16 resolved_port;
+
+    uint64_t sent;
+    uint64_t received;
+
+    union {
+        __be32 ip4; // network notation
+        struct in6_addr ip6;
+    } saddr;
+    __be16 source; // network notation
+
+    union {
+        __be32 ip4; // network notation
+        struct in6_addr ip6;
+    } daddr;
+    __be16 dest; // network notation
+
+    uint8_t state;
+};
+
+struct tcp_session {
+    jint uid;
+    time_t time;
+    int version;
+    uint16_t mss;
+    uint8_t recv_scale;
+    uint8_t send_scale;
+    uint32_t recv_window; // host notation, scaled
+    uint32_t send_window; // host notation, scaled
+    uint16_t unconfirmed; // packets
+
+    uint32_t remote_seq; // confirmed bytes received, host notation
+    uint32_t local_seq; // confirmed bytes sent, host notation
+    uint32_t remote_start;
+    uint32_t local_start;
+
+    uint32_t acked; // host notation
+    long long last_keep_alive;
+
+    // TCP half-close state.  The native engine owns one upstream socket, but
+    // the two directions have independent lifetimes.
+    uint8_t client_fin_seen;
+    uint8_t client_fin_consumed;
+    uint8_t client_fin_acked;
+    uint8_t upstream_write_shutdown;
+    uint8_t upstream_read_eof;
+    uint8_t upstream_hup_pending;
+    uint8_t server_fin_sent;
+    uint8_t server_fin_acked;
+    uint32_t client_fin_seq;
+
+    // A zero receive window is probed on a deadline with exponential backoff.
+    uint32_t window_probe_delay;
+    long long window_probe_deadline;
+
+    uint64_t sent;
+    uint64_t received;
+
+    union {
+        __be32 ip4; // network notation
+        struct in6_addr ip6;
+    } saddr;
+    __be16 source; // network notation
+
+    union {
+        __be32 ip4; // network notation
+        struct in6_addr ip6;
+    } daddr;
+    __be16 dest; // network notation
+
+    uint8_t state;
+    uint8_t socks5;
+    uint8_t socks5_rx[SOCKS5_MESSAGE_MAX];
+    uint16_t socks5_rx_len;
+    uint8_t socks5_tx[SOCKS5_MESSAGE_MAX];
+    uint16_t socks5_tx_len;
+    uint16_t socks5_tx_sent;
+    struct segment *forward;
+
+    int checkedHostname;
+    uint8_t *tls_data; // buffered ClientHello for cross-segment SNI reassembly (research mode)
+    uint16_t tls_len;  // bytes currently buffered in tls_data
+
+    struct dns_stream_state dns_stream; // DNS-over-TCP framing cursor (port 53)
+};
+
+struct ng_session {
+    uint8_t protocol;
+    union {
+        struct icmp_session icmp;
+        struct udp_session udp;
+        struct tcp_session tcp;
+    };
+    jint socket;
+    struct epoll_event ev;
+    struct ng_session *next;
+};
+
+struct uid_cache_entry {
+    uint8_t version;
+    uint8_t protocol;
+    uint8_t saddr[16];
+    uint16_t sport;
+    uint8_t daddr[16];
+    uint16_t dport;
+    jint uid;
+    long time;
+};
+
+// IPv6
+
+struct ip6_hdr_pseudo {
+    struct in6_addr ip6ph_src;
+    struct in6_addr ip6ph_dst;
+    u_int32_t ip6ph_len;
+    u_int8_t ip6ph_zero[3];
+    u_int8_t ip6ph_nxt;
+} __packed;
+
+// PCAP
+// https://wiki.wireshark.org/Development/LibpcapFileFormat
+
+typedef uint16_t guint16_t;
+typedef uint32_t guint32_t;
+typedef int32_t gint32_t;
+
+typedef struct pcap_hdr_s {
+    guint32_t magic_number;
+    guint16_t version_major;
+    guint16_t version_minor;
+    gint32_t thiszone;
+    guint32_t sigfigs;
+    guint32_t snaplen;
+    guint32_t network;
+} __packed pcap_hdr_s;
+
+typedef struct pcaprec_hdr_s {
+    guint32_t ts_sec;
+    guint32_t ts_usec;
+    guint32_t incl_len;
+    guint32_t orig_len;
+} __packed pcaprec_hdr_s;
+
+#define LINKTYPE_RAW 101
+
+// DNS
+
+#define DNS_QCLASS_IN 1
+#define DNS_QTYPE_A 1 // IPv4
+#define DNS_QTYPE_AAAA 28 // IPv6
+
+#define DNS_SVCB 64
+#define DNS_HTTPS 65
+
+#define DNS_QNAME_MAX 255
+#define DNS_TTL (10 * 60) // seconds
+
+struct dns_header {
+    uint16_t id; // identification number
+# if __BYTE_ORDER == __LITTLE_ENDIAN
+    uint16_t rd :1; // recursion desired
+    uint16_t tc :1; // truncated message
+    uint16_t aa :1; // authoritive answer
+    uint16_t opcode :4; // purpose of message
+    uint16_t qr :1; // query/response flag
+    uint16_t rcode :4; // response code
+    uint16_t cd :1; // checking disabled
+    uint16_t ad :1; // authenticated data
+    uint16_t z :1; // its z! reserved
+    uint16_t ra :1; // recursion available
+#elif __BYTE_ORDER == __BIG_ENDIAN
+    uint16_t qr :1; // query/response flag
+    uint16_t opcode :4; // purpose of message
+    uint16_t aa :1; // authoritive answer
+    uint16_t tc :1; // truncated message
+    uint16_t rd :1; // recursion desired
+    uint16_t ra :1; // recursion available
+    uint16_t z :1; // its z! reserved
+    uint16_t ad :1; // authenticated data
+    uint16_t cd :1; // checking disabled
+    uint16_t rcode :4; // response code
+# else
+# error "Adjust your <bits/endian.h> defines"
+#endif
+    uint16_t q_count; // number of question entries
+    uint16_t ans_count; // number of answer entries
+    uint16_t auth_count; // number of authority entries
+    uint16_t add_count; // number of resource entries
+} __packed;
+
+typedef struct dns_rr {
+    __be16 qname_ptr;
+    __be16 qtype;
+    __be16 qclass;
+    __be32 ttl;
+    __be16 rdlength;
+} __packed dns_rr;
+
+// Prototypes
+
+void handle_signal(int sig, siginfo_t *info, void *context);
+
+void *handle_events(void *a);
+
+void report_exit(const struct arguments *args, int error, const char *fmt, ...);
+
+void report_error(const struct arguments *args, jint error, const char *fmt, ...);
+
+void check_allowed(const struct arguments *args);
+
+void clear(struct context *ctx);
+
+int check_icmp_session(const struct arguments *args,
+                       struct ng_session *s,
+                       int sessions, int maxsessions);
+
+int check_udp_session(const struct arguments *args,
+                      struct ng_session *s,
+                      int sessions, int maxsessions);
+
+int check_tcp_session(const struct arguments *args,
+                      struct ng_session *s,
+                      int sessions, int maxsessions);
+
+// Return the number of milliseconds until the next required zero-window probe,
+// or zero when no probe is scheduled.
+int monitor_tcp_session(const struct arguments *args, struct ng_session *s, int epoll_fd);
+
+// Testable scheduling primitive used by monitor_tcp_session.  window_open
+// resets the backoff; send_probe is set when a probe is due now.
+int tcp_window_probe_delay(struct tcp_session *cur, long long now,
+                           int window_open, int *send_probe);
+
+int get_icmp_timeout(const struct icmp_session *u, int sessions, int maxsessions);
+
+int get_udp_timeout(const struct udp_session *u, int sessions, int maxsessions);
+
+int get_tcp_timeout(const struct tcp_session *t, int sessions, int maxsessions);
+
+uint16_t get_mtu();
+
+uint16_t get_default_mss(int version);
+
+int check_tun(const struct arguments *args,
+              const struct epoll_event *ev,
+              const int epoll_fd,
+              int sessions, int maxsessions);
+
+void check_icmp_socket(const struct arguments *args, const struct epoll_event *ev);
+
+void check_udp_socket(const struct arguments *args, const struct epoll_event *ev);
+
+void parse_dns_response(const struct arguments *args, const struct ng_session *session,
+                        uint8_t *data, size_t *datalen);
+
+void record_dns_response(const struct arguments *args, uint8_t *data, size_t datalen);
+
+void parse_dns_partial_response(const struct arguments *args,
+                                const struct ng_session *session,
+                                uint8_t *data, size_t *datalen, int *blanked);
+
+uint32_t get_send_window(const struct tcp_session *cur);
+
+uint32_t get_receive_buffer(const struct ng_session *cur);
+
+uint32_t get_receive_window(const struct ng_session *cur);
+
+void check_tcp_socket(const struct arguments *args,
+                      const struct epoll_event *ev,
+                      const int epoll_fd);
+
+void handle_ip(const struct arguments *args,
+               const uint8_t *buffer, size_t length,
+               const int epoll_fd,
+               int sessions, int maxsessions);
+
+jboolean handle_icmp(const struct arguments *args,
+                     const uint8_t *pkt, size_t length,
+                     const uint8_t *payload,
+                     int uid,
+                     const int epoll_fd);
+
+int get_udp_session_state(const struct arguments *args,
+                          const uint8_t *pkt, const uint8_t *payload);
+
+void block_udp(const struct arguments *args,
+               const uint8_t *pkt, size_t length,
+               const uint8_t *payload,
+               int uid);
+
+jboolean handle_udp(const struct arguments *args,
+                    const uint8_t *pkt, size_t length,
+                    const uint8_t *payload,
+                    int uid, struct allowed *redirect,
+                    const int epoll_fd);
+
+void clear_tcp_data(struct tcp_session *cur);
+
+jboolean handle_tcp(const struct arguments *args,
+                    const uint8_t *pkt, size_t length,
+                    const uint8_t *payload,
+                    int uid, int allowed, struct allowed *redirect,
+                    const int epoll_fd);
+
+void queue_tcp(const struct arguments *args,
+               const struct tcphdr *tcphdr,
+               const char *session, struct tcp_session *cur,
+               const uint8_t *data, uint16_t datalen);
+
+int open_icmp_socket(const struct arguments *args, const struct icmp_session *cur);
+
+int open_udp_socket(const struct arguments *args,
+                    const struct udp_session *cur);
+
+int open_tcp_socket(const struct arguments *args,
+                    const struct tcp_session *cur, const struct allowed *redirect);
+
+int32_t get_local_port(const int sock);
+
+int write_syn_ack(const struct arguments *args, struct tcp_session *cur);
+
+int write_ack(const struct arguments *args, struct tcp_session *cur);
+
+int write_data(const struct arguments *args, struct tcp_session *cur,
+               const uint8_t *buffer, size_t length);
+
+int write_fin_ack(const struct arguments *args, struct tcp_session *cur);
+
+void write_rst(const struct arguments *args, struct tcp_session *cur);
+
+void write_rst_ack(const struct arguments *args, struct tcp_session *cur);
+
+ssize_t write_icmp(const struct arguments *args, const struct icmp_session *cur,
+                   uint8_t *data, size_t datalen);
+
+ssize_t write_udp(const struct arguments *args, const struct udp_session *cur,
+                  uint8_t *data, size_t datalen);
+
+ssize_t write_tcp(const struct arguments *args, const struct tcp_session *cur,
+                  const uint8_t *data, size_t datalen,
+                  int syn, int ack, int fin, int rst);
+
+uint8_t char2nible(const char c);
+
+void hex2bytes(const char *hex, uint8_t *buffer);
+
+jint get_uid(const int version, const int protocol,
+             const void *saddr, const uint16_t sport,
+             const void *daddr, const uint16_t dport);
+
+jint get_uid_sub(const int version, const int protocol,
+                 const void *saddr, const uint16_t sport,
+                 const void *daddr, const uint16_t dport,
+                 const char *source, const char *dest,
+                 long now);
+
+int protect_socket(const struct arguments *args, int socket);
+
+uint16_t calc_checksum(uint16_t start, const uint8_t *buffer, size_t length);
+
+jobject jniGlobalRef(JNIEnv *env, jobject cls);
+
+jclass jniFindClass(JNIEnv *env, const char *name);
+
+jmethodID jniGetMethodID(JNIEnv *env, jclass cls, const char *name, const char *signature);
+
+jfieldID jniGetFieldID(JNIEnv *env, jclass cls, const char *name, const char *type);
+
+jobject jniNewObject(JNIEnv *env, jclass cls, jmethodID constructor, const char *name);
+
+int jniCheckException(JNIEnv *env);
+
+int sdk_int(JNIEnv *env);
+
+void log_android(int prio, const char *fmt, ...);
+
+void log_packet(const struct arguments *args, jobject jpacket);
+
+void dns_resolved(const struct arguments *args,
+                  const char *qname, const char *aname, const char *resource, int ttl);
+
+jboolean is_domain_blocked(const struct arguments *args, const char *name);
+
+// Per-app remote routing (policy.c, deciding in wgbridge-rs/src/policy.rs).
+// Java pushes down only the UIDs whose routing differs from the global default;
+// the packet path only reads them.
+void policy_ensure();
+
+void set_route_uids(const jint *uids, int count, int default_tunnel, int dns_direct);
+
+void clear_route_uids();
+
+int is_tunnel_uid(jint uid);
+
+// Lock-free fast path: whether a UID lookup can change the answer at all, the
+// answer everything gets when it cannot, and whether DNS follows that answer.
+int route_uid_relevant();
+
+int route_default_is_tunnel();
+
+int route_dns_direct();
+
+int route_wants_tunnel(int local_dest, int is_dns, int tunnel_uid, int dns_direct);
+
+int route_dest_tunnelled(int version, const void *daddr);
+
+// Per-flow verdict cache, so a flow that has already been routed keeps its
+// answer once its packets stop carrying a UID. Tunnel-thread only.
+int route_flow_lookup(int version, int protocol,
+                      const void *saddr, uint16_t sport,
+                      const void *daddr, uint16_t dport,
+                      int *tunnel, int *uid_known);
+
+// The policy verdict shares the flow cache generation with the route verdict.
+// UNKNOWN means that the flow must take the normal Java block decision.
+#define ROUTE_FLOW_VERDICT_UNKNOWN (-1)
+#define ROUTE_FLOW_VERDICT_BLOCKED 0
+#define ROUTE_FLOW_VERDICT_ALLOWED 1
+
+int route_flow_lookup_verdict(int version, int protocol,
+                              const void *saddr, uint16_t sport,
+                              const void *daddr, uint16_t dport,
+                              int *verdict);
+
+void route_flow_store_verdict(int version, int protocol,
+                              const void *saddr, uint16_t sport,
+                              const void *daddr, uint16_t dport,
+                              int verdict);
+void route_flow_clear_verdict(int version, int protocol,
+                              const void *saddr, uint16_t sport,
+                              const void *daddr, uint16_t dport);
+
+void route_flow_store(int version, int protocol,
+                      const void *saddr, uint16_t sport,
+                      const void *daddr, uint16_t dport,
+                      int tunnel, int uid_known);
+
+void route_flow_invalidate();
+
+// Numeric owner cache for established TCP flows. This is independent of the
+// generation-scoped route/policy cache, and therefore survives policy reloads
+// and ordinary WireGuard restarts. The cache is bounded and expires idle
+// entries using CLOCK_MONOTONIC.
+int tcp_owner_lookup(int version,
+                     const void *saddr, uint16_t sport,
+                     const void *daddr, uint16_t dport,
+                     jint *uid);
+void tcp_owner_store(int version,
+                     const void *saddr, uint16_t sport,
+                     const void *daddr, uint16_t dport,
+                     jint uid);
+void tcp_owner_forget(int version,
+                      const void *saddr, uint16_t sport,
+                      const void *daddr, uint16_t dport);
+void tcp_owner_reset();
+
+jint get_uid_q(const struct arguments *args,
+               jint version,
+               jint protocol,
+               const char *source,
+               jint sport,
+               const char *dest,
+               jint dport);
+
+struct allowed *is_address_allowed(const struct arguments *args, jobject objPacket);
+
+jobject create_packet(const struct arguments *args,
+                      jint version,
+                      jint protocol,
+                      const char *flags,
+                      const char *source,
+                      jint sport,
+                      const char *dest,
+                      jint dport,
+                      const char *data,
+                      jint uid,
+                      jboolean allowed);
+
+void account_usage(const struct arguments *args, jint version, jint protocol,
+                   const char *daddr, jint dport, jint uid, jlong sent, jlong received);
+
+extern pthread_mutex_t pcap_lock;
+
+// Caller must hold pcap_lock; see pcap.c.
+void write_pcap_hdr_locked();
+
+void pcap_close_locked();
+
+void write_pcap_rec(const uint8_t *buffer, size_t len);
+
+int compare_u32(uint32_t seq1, uint32_t seq2);
+
+const char *strstate(const int state);
+
+char *hex(const u_int8_t *data, const size_t len);
+
+int is_readable(int fd);
+
+int is_writable(int fd);
+
+long long get_ms();
+
+void ng_add_alloc(void *ptr, const char *tag);
+
+void ng_delete_alloc(void *ptr, const char *file, int line);
+
+void *ng_malloc(size_t __byte_count, const char *tag);
+
+void *ng_calloc(size_t __item_count, size_t __item_size, const char *tag);
+
+void *ng_realloc(void *__ptr, size_t __byte_count, const char *tag);
+
+void ng_free(void *__ptr, const char *file, int line);
+
+void ng_dump();

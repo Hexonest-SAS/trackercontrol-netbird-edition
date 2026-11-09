@@ -1,0 +1,698 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="app_description">TrackerControl permette agli utenti di monitorare e controllare la continua, diffusa e nascosta raccolta di dati riguardo i loro comportamenti effettuata dalle applicazioni (\'tracciamento\').</string>
+    <string name="app_copyright">Copyright © 2019–2022 Konrad Kollnig\n\nTrackerControl si basa su NetGuard, sviluppato da Marcel Bokhorst (M66B).</string>
+    <string name="app_android">TrackerControl richiede Android 5.1 o successiva</string>
+    <string name="app_xposed">Xposed causa troppi crash, che potrebbero portare alla rimozione di TrackerControl dal Google Play Store, perciò TrackerControl non è supportato quando Xposed è installato</string>
+    <string name="app_eula">L\'utilizzo di questa app è a tuo rischio. Nessuna app può garantire una protezione assoluta contro il tracciamento.</string>
+    <string name="app_privacy"><a href="https://github.com/TrackerControl/tracker-control-android#privacy-notice">Informativa sulla privacy</a> <a href="https://github.com/TrackerControl/tracker-control-android#cookie-policy">Informativa sui cookie</a></string>
+    <string name="app_ios"><a href="https://ios.trackercontrol.org">TrackerControl è disponibile anche per iOS</a></string>
+    <string name="channel_foreground">Servizi in esecuzione</string>
+    <string name="channel_notify">Notifiche generali</string>
+    <string name="channel_access">Accesso alle notifiche</string>
+    <string name="menu_search">Cerca applicazione</string>
+    <string name="menu_filter">Filtra applicazioni</string>
+    <string name="menu_app_user">Mostra applicazioni utente</string>
+    <string name="menu_app_system">Mostra applicazioni di sistema</string>
+    <string name="menu_app_nointernet">Mostra le applicazioni senza accesso a Internet</string>
+    <string name="menu_app_unprotected">Mostra solo le app non protette</string>
+    <string name="menu_app_frozen">Mostra le app bloccate</string>
+    <string name="menu_sort">Ordina applicazioni</string>
+    <string name="menu_sort_name">Ordina per nome</string>
+    <string name="menu_sort_uid">Ordina per uid</string>
+    <string name="menu_sort_companies_week">Ordina per società (settimana)</string>
+    <string name="menu_sort_companies">Ordina per azienda</string>
+    <string name="menu_sort_by_latest_detected_tracker">Ordina per ultimo tracker rilevato</string>
+    <string name="menu_log">Registro del traffico</string>
+    <string name="menu_settings">Impostazioni</string>
+    <string name="menu_invite">Invita</string>
+    <string name="menu_legend">Legenda</string>
+    <string name="menu_support">Supporta questa app</string>
+    <string name="menu_log_support">Spiegazioni</string>
+    <string name="menu_troubleshooting">Risoluzione problemi</string>
+    <string name="menu_about">Informazioni</string>
+    <string name="timeline_empty_disabled_title">TrackerControl è disattivato</string>
+    <string name="timeline_empty_disabled_subtitle">Attiva TrackerControl con l\'interruttore in alto a destra. L\'attività dei tracker delle tue app apparirà poi qui.</string>
+    <string name="timeline_empty_enabled_title">In ascolto di tracker…</string>
+    <string name="timeline_empty_enabled_subtitle">La maggior parte delle app contatta i tracker solo mentre le usi. Apri un\'app, poi torna qui: la sua attività di tracker apparirà qui.</string>
+    <string name="timeline_empty_recording_off_title">La registrazione dei tracker è disattivata</string>
+    <string name="timeline_empty_recording_off_subtitle">“Ricerca nuovi tracker” è disattivato nelle impostazioni avanzate. I tracker vengono comunque bloccati, ma non sono più registrati, quindi questa Cronologia resta vuota. Riattivalo per vedere di nuovo l\'attività dei tracker.</string>
+    <string name="timeline_empty_recording_unavailable_title">Tracker registrazione non disponibile</string>
+    <string name="timeline_empty_recording_unavailable_subtitle">Questa versione di TrackerControl non espone la registrazione dell\'attività dei tracker. Il blocco funziona ancora, ma questa Cronologia resterà vuota.</string>
+    <string name="timeline_open_app">Apri un app</string>
+    <string name="timeline_open_settings">Apri impostazioni</string>
+    <string name="timeline_hint_tap_entry">Un\'app non funziona? Tocca la sua voce per modificarne la protezione.</string>
+    <string name="timeline_hint_dismiss">Ho capito</string>
+    <string name="unidentified_app_uid">Non identificata app (UID %1$d)</string>
+    <string name="tab_timeline">Cronologia</string>
+    <string name="tab_apps">App</string>
+    <string name="timeline_section_last_hour">Ultima ora</string>
+    <string name="timeline_section_today">Oggi</string>
+    <string name="timeline_section_yesterday">Ieri</string>
+    <string name="timeline_section_this_week">Questa settimana</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="timeline_more_trackers" tools:ignore="PluralsCandidate">+%d altro</string>
+    <string name="timeline_tracker_blocked">Bloccato</string>
+    <string name="timeline_tracker_allowed">Consentito</string>
+    <!-- A blocked/allowed label followed by its share of all tracking attempts. -->
+    <string name="feed_section_last_contact">ultimo contatto %s</string>
+    <plurals name="feed_show_more_companies">
+        <item quantity="one">Mostra %d azienda in più</item>
+        <item quantity="other">Mostra %d aziende in più</item>
+    </plurals>
+    <string name="feed_allow_company_in_app">Consenti %1$s in %2$s</string>
+    <string name="feed_block_company_in_app">Blocca %1$s in %2$s</string>
+    <string name="feed_allowed_by_you">Consentito da te</string>
+    <string name="feed_allowed_shared_ip">Consentito · IP condiviso</string>
+    <string name="feed_monitored">Monitorato</string>
+    <string name="feed_company_expanded">Espanso</string>
+    <string name="feed_company_collapsed">Compresso</string>
+    <string name="feed_essential_explainer">Necessario per le app — consentito affinché %s continui a funzionare</string>
+    <string name="feed_essential_explainer_blocked">Necessario per le app — bloccarli potrebbe compromettere %s</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="timeline_summary_mixed" tools:ignore="PluralsCandidate">%1$d bloccato · %2$d consentito</string>
+    <plurals name="timeline_trackers_blocked">
+        <item quantity="one">%d tracker bloccato</item>
+        <item quantity="other">%d tracker bloccati</item>
+    </plurals>
+    <plurals name="timeline_trackers_allowed">
+        <item quantity="one">%d tracker consentito</item>
+        <item quantity="other">%d tracker consentiti</item>
+    </plurals>
+    <string name="troubleshooting_title">Risoluzione problemi</string>
+    <string name="troubleshooting_battery_title">Ottimizzazione della batteria</string>
+    <string name="troubleshooting_battery_desc">Se TrackerControl smette di funzionare in background, disattiva l\'ottimizzazione della batteria di Android per TrackerControl. Seleziona \"Tutte le app\", tocca TrackerControl e seleziona \"Non ottimizzare\".</string>
+    <string name="troubleshooting_battery_action">Disattiva l\'ottimizzazione della batteria</string>
+    <string name="troubleshooting_battery_ok">L\'ottimizzazione della batteria è già disattivata.</string>
+    <string name="troubleshooting_datasaver_title">Risparmio dati</string>
+    <string name="troubleshooting_datasaver_desc">Se TrackerControl non riesce a connettersi quando Risparmio dati è attivo, consenti l\'utilizzo illimitato dei dati per TrackerControl. Attiva \"Dati in background\" e \"Utilizzo dati senza restrizioni\".</string>
+    <string name="troubleshooting_datasaver_action">Consenti dati senza restrizioni</string>
+    <string name="troubleshooting_datasaver_ok">Il risparmio dati non limita TrackerControl.</string>
+    <string name="troubleshooting_local_network_title">Locale rete accesso</string>
+    <string name="troubleshooting_local_network_desc">L\'autorizzazione è necessaria per server DNS locali, peer WireGuard e proxy.</string>
+    <string name="troubleshooting_local_network_action">Consenti locale rete accesso</string>
+    <string name="troubleshooting_local_network_ok">Locale rete accesso è consentito.</string>
+    <string name="troubleshooting_app_breakage_title">Un\'app ha smesso di funzionare</string>
+    <string name="troubleshooting_app_breakage_desc">Tocca l\'app nell\'elenco principale, poi tocca Protezione. Prova prima \"Solo blocco minimo\". Se l\'app ha ancora problemi, scegli \"Tracker consentiti\". Usa \"Ignora TrackerControl\" solo come ultima risorsa.</string>
+    <string name="troubleshooting_categories_title">Bloccare categorie specifiche di tracker</string>
+    <string name="troubleshooting_categories_desc">Puoi regolare con precisione il blocco per ogni app toccandola e attivando o disattivando le singole categorie di tracker (ad es. Statistiche, Pubblicità) nella scheda Tracker.</string>
+    <string name="troubleshooting_alwayson_title">VPN sempre attiva</string>
+    <string name="troubleshooting_alwayson_desc">Se \"Blocca connessioni senza VPN\" (lockdown) è attivo nelle impostazioni VPN di Android, TrackerControl non può funzionare correttamente. Disattiva questa opzione.</string>
+    <string name="troubleshooting_alwayson_action">Apri VPN impostazioni</string>
+    <string name="menu_apps">Altre applicazioni</string>
+    <string name="menu_protocol_other">Altro</string>
+    <string name="menu_traffic_allowed">Consentito</string>
+    <string name="menu_traffic_blocked">Bloccato</string>
+    <string name="menu_live">Aggiornamenti in tempo reale</string>
+    <string name="menu_refresh">Aggiorna</string>
+    <string name="menu_resolve">Mostra nomi</string>
+    <string name="menu_organization">Mostra azienda</string>
+    <string name="menu_pcap_enabled">PCAP abilitato</string>
+    <string name="menu_pcap_export">Esporta PCAP</string>
+    <string name="menu_clear">Elimina tutto</string>
+    <string name="menu_clear_activity">Cancella l\'attività registrata</string>
+    <string name="menu_export">Esporta</string>
+    <string name="menu_reset">Resetta</string>
+    <string name="menu_cleanup">Ripulisci</string>
+    <string name="setting_options">Generali</string>
+    <string name="setting_further_options">Ulteriori opzioni</string>
+    <string name="setting_pause">Attiva automaticamente dopo %1$s minuti</string>
+    <string name="setting_update">Cerca aggiornamenti</string>
+    <plurals name="pause">
+        <item quantity="one">Sospendi per %d minuto</item>
+        <item quantity="other">Sospendi per %d minuti</item>
+    </plurals>
+    <string name="setting_ip6">Abilita il traffico IPv6</string>
+    <string name="setting_call">Disabilita durante le chiamate</string>
+    <string name="setting_reload_onconnectivity">Ricarica ad ogni cambio di connessione</string>
+    <string name="setting_tcp_mss_clamp">Modalità compatibilità tethering</string>
+    <string name="summary_tcp_mss_clamp">Instrada tutto il traffico attraverso TrackerControl e limita la dimensione dei segmenti TCP, per risolvere i problemi delle connessioni in tethering che si bloccano o non hanno accesso a internet. L\'accesso alla rete locale non aggira più TrackerControl e le prestazioni potrebbero ridursi.</string>
+    <string name="setting_advanced_options">Opzioni avanzate (per esperti)</string>
+    <string name="setting_log_app">Ricerca nuovi tracker</string>
+    <string name="setting_log_logcat">Ricerca</string>
+    <string name="setting_handover">Passaggio alla VPN senza interruzioni al momento del ricaricamento</string>
+    <string name="setting_reset_usage">Resetta l\'utilizzo della rete</string>
+    <string name="setting_show_resolved">Mostra nomi di dominio risolti</string>
+    <string name="setting_exclude_all_tracking">Escludi tutte le app dal tracciamento</string>
+    <string name="summary_exclude_all_tracking">Disattiva il monitoraggio dei tracker per tutte le app. Potrai poi riattivarlo per le singole app.</string>
+    <string name="setting_include_all_tracking">Includi tutte le app nel tracciamento</string>
+    <string name="summary_include_all_tracking">Riattiva il monitoraggio dei tracker per tutte le app.</string>
+    <string name="setting_block_domains">Abilita il file hosts</string>
+    <string name="setting_rcode">Questi hosts bloccano la risposta: %s</string>
+    <string name="setting_vpn4">VPN IPv4: %s</string>
+    <string name="setting_vpn6">VPN IPv6: %s</string>
+    <string name="setting_dns">VPN DNS: %s</string>
+    <string name="setting_validate">Convalida: %s</string>
+    <string name="setting_ttl">DNS TTL minimo: %s s</string>
+    <string name="setting_socks5_enabled">Usa proxy SOCKS5</string>
+    <string name="setting_socks5_addr">Indirizzo SOCKS5: %s</string>
+    <string name="setting_socks5_port">Porta SOCKS5: %s</string>
+    <string name="setting_socks5_username">Nome utente SOCKS5: %s</string>
+    <string name="setting_socks5_password">Password SOCKS5: %s</string>
+    <string name="setting_wg_enabled">Instrada il traffico attraverso WireGuard</string>
+    <string name="setting_wg_profile">WireGuard profilo</string>
+    <string name="setting_wg_profile_manage">Profili WireGuard personalizzati</string>
+    <string name="setting_wg_profile_import">Importa WireGuard configurazione</string>
+    <string name="setting_wg_profile_scan">Scansiona codice QR</string>
+    <string name="setting_wg_profile_import_file">Importa da file o archivio</string>
+    <string name="setting_wg_mullvad_setup">Configura Mullvad</string>
+    <string name="setting_wg_proton_setup">Usa una configurazione Proton VPN</string>
+    <string name="setting_wg_keepalive_when_screen_off">Mantieni WireGuard attivo a schermo spento</string>
+    <string name="setting_wg_profile_save">Salva profilo</string>
+    <string name="setting_wg_profile_delete">Elimina profilo</string>
+    <string name="accessibility_wg_profile_edit">Modifica WireGuard profilo %1$s</string>
+    <string name="accessibility_wg_profile_delete">Elimina WireGuard profilo %1$s</string>
+    <string name="setting_wireguard">WireGuard (anteprima)</string>
+    <string name="setting_wg_status">Stato</string>
+    <string name="setting_vpn_key_rotate_now">Ruota ora le chiavi del provider VPN</string>
+    <string name="setting_pcap_record_size">Dimensioni record PCAP: %s B</string>
+    <string name="setting_pcap_file_size">Dimensione max. file PCAP: %s MB</string>
+    <!-- Secure DNS (DoH) -->
+    <string name="summary_doh_enabled">Cifra le richieste DNS tramite DNS-over-HTTPS. Sospeso automaticamente quando WireGuard è attivo, perché in tal caso le richieste usano il tunnel WireGuard.</string>
+    <string name="warning_beta">Funzione beta. Potrebbe non funzionare come previsto.</string>
+    <string name="setting_doh_endpoint">URL dell\'endpoint DoH</string>
+    <string name="summary_doh_endpoint">URL HTTPS per le richieste DNS-over-HTTPS</string>
+    <string name="dialog_doh_endpoint">Inserisci l\'URL HTTPS completo fornito dal tuo provider DNS, incluso il percorso specifico del provider (ad esempio, https://dns.quad9.net/dns-query). Le app escluse da TrackerControl, o che usano un proprio DNS cifrato, ignorano questa impostazione.</string>
+    <string name="setting_doh_dns_fallback">DNS alternativa</string>
+    <string name="summary_doh_dns_fallback">Usa il DNS standard (non cifrato) quando DoH non funziona. Il DNS alternativo potrebbe usare un provider DNS diverso. Disattivarlo può compromettere le app se il server DoH non è raggiungibile.</string>
+    <string name="msg_invalid_doh_endpoint">Inserisci un URL HTTPS completo per DNS-over-HTTPS, incluso il percorso del provider (ad esempio, https://dns.quad9.net/dns-query).</string>
+    <!-- Block DNS-over-TLS (DoT) -->
+    <string name="setting_block_dot">Blocca il DNS privato di Android</string>
+    <string name="summary_block_dot">Con il DNS privato di Android attivo, TC non può rilevare alcun tracciamento e non funziona correttamente.</string>
+    <string name="setting_stats_frequency">Intervallo di campionamento: %s ms</string>
+    <string name="setting_stats_samples">Numero di campioni: %s s</string>
+    <string name="setting_backup">Backup</string>
+    <string name="setting_export">Esporta impostazioni</string>
+    <string name="setting_import">Importa impostazioni</string>
+    <string name="setting_hosts_update">Aggiorna file host</string>
+    <string name="setting_hosts_auto_update">Aggiorna automaticamente hosts</string>
+    <string name="summary_hosts_auto_update">Aggiorna automaticamente il file hosts in background</string>
+    <string name="summary_pause">Dopo aver messo in pausa TrackerControl tramite la barra delle notifiche, riabilitalo automaticamente dopo il numero di minuti specificato (inserire 0 per disabilitare questa opzione).</string>
+    <string name="summary_update">Cerca nuove versioni su GitHub due volte al giorno</string>
+    <string name="summary_ip6">Indirizza il traffico IP versione 6 verso TrackerControl così da consentirlo o bloccarlo selettivamente</string>
+    <string name="summary_call">Disattiva TrackerControl durante le chiamate telefoniche. Può essere utile per risolvere problemi legati alle chiamate IP/Wi-Fi.</string>
+    <string name="summary_log_app">Disabilita per diminuire il consumo della batteria. I nuovi tracker verranno comunque bloccati, ma non saranno mostrati.</string>
+    <string name="summary_block_domains">ATTENZIONE: Gli hosts bloccati non sono mostrati nell\'interfaccia utente.</string>
+    <string name="summary_rcode">Il valore predefinito è 3 (NXDOMAIN), che significa \'dominio inesistente\'.</string>
+    <string name="summary_validate">Nome di dominio utilizzato per convalidare la connessione internet alla porta 443 (https).</string>
+    <string name="summary_socks5_enabled">Solo il traffico TCP verrà inviato al server proxy</string>
+    <string name="summary_wg_enabled">Nasconde l\'IP del dispositivo. Instrada in tunnel il traffico TCP e UDP in uscita. Le app vedranno errori di rete durante le interruzioni: fail-closed, nessun passaggio al traffico diretto. Le connessioni avviate dal server verso il telefono potrebbero non funzionare mentre il tunnel è inattivo (il keepalive è disattivato per risparmiare batteria).</string>
+    <string name="summary_wg_config">Incolla una configurazione [Interface] / [Peer] dal tuo provider</string>
+    <string name="summary_wg_profile">Scegli una configurazione WireGuard salvata</string>
+    <string name="summary_wg_profile_none">Nessun profilo salvato</string>
+    <string name="summary_wg_profile_manage">Aggiungi, modifica o elimina configurazioni WireGuard personalizzate</string>
+    <string name="summary_wg_keepalive_when_screen_off">Invia pacchetti keepalive all\'intervallo impostato nella tua configurazione WireGuard anche a schermo spento. Migliora l\'affidabilità sulle reti in cui le connessioni inattive vengono interrotte, ma aumenta il consumo della batteria.</string>
+    <string name="summary_wg_status_off">Disattivato</string>
+    <string name="summary_wg_status_missing_config">Disattivato — nessuna configurazione impostata</string>
+    <string name="summary_wg_status_connected">Connesso</string>
+    <string name="summary_wg_status_handshaking">Negoziazione…</string>
+    <string name="summary_wg_status_blocked">Bloccato — %s</string>
+    <string name="summary_wg_status_starting">Avvio</string>
+    <string name="summary_vpn_key_rotate_now">Forza la rotazione delle chiavi WireGuard di Mullvad e IVPN per il debug</string>
+    <string name="msg_vpn_key_rotation_started">Rotazione della chiave VPN avviata</string>
+    <string name="msg_wg_config_invalid">Non valida WireGuard configurazione: %s</string>
+    <string name="msg_wg_profile_name">Profilo nome</string>
+    <string name="msg_wg_profile_default_name">Predefinito</string>
+    <string name="msg_wg_profile_saved">Profilo WireGuard salvato</string>
+    <string name="msg_wg_profile_deleted">Profilo WireGuard eliminato</string>
+    <string name="msg_wg_profile_empty">Ancora nessun profilo</string>
+    <string name="msg_wg_profile_active">Attivo</string>
+    <string name="msg_wg_profile_set_active">Imposta attivo</string>
+    <string name="msg_wg_profile_config_hint" tools:ignore="TypographyEllipsis">[Interface]\nPrivateKey = …\nAddress = …\n\n[Peer]\nPublicKey = …\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = …</string>
+    <string name="msg_wg_profile_delete_confirm">Elimina questa WireGuard profilo?</string>
+    <string name="msg_wg_profile_scan_hint">Inquadra con la fotocamera il codice QR WireGuard mostrato dal tuo provider VPN. La scansione avviene sul tuo dispositivo.</string>
+    <string name="msg_wg_profile_scan_no_camera">Questo dispositivo non ha una fotocamera con cui eseguire la scansione</string>
+    <string name="msg_wg_profile_scan_no_camera_permission">Per scansionare un codice QR serve l\'autorizzazione della fotocamera</string>
+    <string name="msg_wg_profile_scan_failed">Impossibile avviare la fotocamera: %1$s</string>
+    <string name="msg_wg_profile_scan_not_config">Questo codice QR non è una configurazione WireGuard: %1$s</string>
+    <string name="msg_wg_profile_import_none">Nessuna configurazione WireGuard trovata nel file selezionato</string>
+    <string name="msg_wg_profile_import_failed">Impossibile leggere il file selezionato: %1$s</string>
+    <plurals name="msg_wg_profile_imported">
+        <item quantity="one">%1$d profilo WireGuard importato</item>
+        <item quantity="other">%1$d profili WireGuard importati</item>
+    </plurals>
+    <plurals name="msg_wg_profile_import_skipped">
+        <item quantity="one">%1$d file ignorato: non è una configurazione WireGuard valida</item>
+        <item quantity="other">%1$d file ignorati: non sono configurazioni WireGuard valide</item>
+    </plurals>
+    <string name="msg_wg_mullvad_account">Mullvad account numero</string>
+    <string name="msg_wg_mullvad_recommended">Posizione consigliata</string>
+    <string name="msg_wg_mullvad_note">TrackerControl crea un profilo WireGuard Mullvad. Il numero di account viene salvato localmente per i futuri profili Mullvad. I token non vengono memorizzati e l\'eliminazione del profilo qui non rimuove il dispositivo da Mullvad.</string>
+    <string name="msg_wg_mullvad_generating">Creazione del profilo WireGuard…</string>
+    <string name="msg_wg_mullvad_failed">Configurazione di Mullvad non riuscita: %s</string>
+    <string name="msg_wg_mullvad_countries_failed">Impossibile caricare i paesi di Mullvad: %s</string>
+    <string name="msg_wg_proton_note">La configurazione di terze parti documentata da Proton usa configurazioni WireGuard scaricabili. TrackerControl non ha bisogno delle tue credenziali Proton e non può aggiornare la configurazione automaticamente.\n\nAccedi a account.protonvpn.com, vai su Downloads → WireGuard configuration, scarica una configurazione, aprila in un editor di testo, poi copia e incolla qui il suo contenuto.</string>
+    <string name="msg_wg_proton_open_dashboard">Apri la dashboard di Proton VPN</string>
+    <string name="vpn_status_wireguard_connected">WireGuard connesso</string>
+    <string name="vpn_status_disconnected">Non connesso</string>
+    <string name="vpn_intro_title">Anteprima VPN</string>
+    <string name="vpn_intro_body">Una VPN instrada il tuo traffico internet attraverso un altro server. Questo può nascondere il tuo indirizzo IP ai siti web e al tuo provider di rete e ti permette di scegliere il paese della connessione. Questa scheda è nuova, quindi trattala come un\'anteprima.</string>
+    <string name="vpn_intro_mullvad_body">Un provider VPN attento alla privacy. Costa €5 al mese e usa numeri di account invece degli indirizzi email. Inserisci un numero di account, poi scegli un paese in TrackerControl.</string>
+    <string name="vpn_intro_ivpn_body">Un provider VPN attento alla privacy con supporto WireGuard. Inserisci un ID account IVPN, poi scegli un paese in TrackerControl.</string>
+    <string name="vpn_intro_proton_body">Scarica una configurazione WireGuard dal tuo account Proton VPN e incollala in TrackerControl. Le tue credenziali Proton non vengono mai inserite qui.</string>
+    <string name="vpn_intro_wireguard_body">Usa questa opzione se hai già una configurazione WireGuard di un altro provider VPN, di un tuo server o del tuo posto di lavoro.</string>
+    <string name="vpn_enter_mullvad_account">Inserisci account numero</string>
+    <string name="vpn_enter_ivpn_account">Inserisci l\'ID account</string>
+    <string name="vpn_settings">Mullvad impostazioni</string>
+    <string name="vpn_settings_title">Mullvad impostazioni</string>
+    <string name="vpn_ivpn_settings">IVPN impostazioni</string>
+    <string name="vpn_ivpn_settings_title">IVPN impostazioni</string>
+    <string name="vpn_account_not_set">Account: non imposta</string>
+    <string name="vpn_account_show">Mostra</string>
+    <string name="vpn_account_hide">Nascondi</string>
+    <string name="vpn_account_change">Cambia</string>
+    <string name="vpn_account_cancel">Annulla</string>
+    <string name="vpn_mullvad_intro">Inserisci il tuo numero di account Mullvad. Viene salvato su questo dispositivo.</string>
+    <string name="vpn_mullvad_account_note">Questo account viene usato per le connessioni ai paesi di Mullvad.</string>
+    <string name="vpn_get_mullvad_account">Ottieni Mullvad account</string>
+    <string name="vpn_get_ivpn_account">Ottieni IVPN account</string>
+    <string name="vpn_account_hint">Mullvad account numero</string>
+    <string name="vpn_ivpn_intro">Inserisci il tuo ID account IVPN. Viene salvato su questo dispositivo.</string>
+    <string name="vpn_ivpn_captcha_intro">IVPN richiede la verifica CAPTCHA prima di creare una sessione WireGuard.</string>
+    <string name="vpn_ivpn_account_hint">ID account IVPN</string>
+    <string name="vpn_ivpn_captcha_hint">Testo CAPTCHA</string>
+    <string name="vpn_account_save">Salva</string>
+    <string name="vpn_account_saved">Account salvato</string>
+    <string name="vpn_no_wireguard_profiles">Ancora nessun profilo WireGuard personalizzato</string>
+    <string name="vpn_import_wireguard_profile">Importa WireGuard profilo</string>
+    <string name="vpn_manage_wireguard_profiles">Gestisci WireGuard profili</string>
+    <string name="vpn_country_load_failed">Impossibile caricare i paesi di %1$s: %2$s</string>
+    <string name="vpn_country_load_failed_short">Impossibile caricare i paesi</string>
+    <string name="vpn_choose_country_first">Scegli un paese prima</string>
+    <string name="vpn_choose_profile_first">Scegli un WireGuard profilo prima</string>
+    <string name="vpn_setup_required">Prima configura Mullvad o importa un profilo WireGuard</string>
+    <string name="vpn_loading_countries">Caricamento paesi…</string>
+    <string name="vpn_generating">Creazione del profilo WireGuard…</string>
+    <string name="vpn_generation_failed">Configurazione VPN non riuscita: %s</string>
+    <string name="vpn_retry">Riprova</string>
+    <string name="msg_wg_blocked_title">Tunnel WireGuard non disponibile</string>
+    <string name="msg_wg_blocked">L\'accesso a Internet è bloccato finché il tunnel WireGuard non è disponibile. Disattiva l\'impostazione WireGuard per ripristinarlo.</string>
+    <!-- The cause comes first so it does not read as a tunnel that never
+         started when the detail says it stopped responding. The tail stays
+         neutral about recovery: some causes, such as a lapsed subscription,
+         never resolve on their own. Each %s already names its own remedy
+         where it has one, so this must not repeat it. -->
+    <string name="msg_wg_blocked_detail">%s L\'accesso a Internet resta bloccato finché il problema non viene risolto o finché l\'impostazione WireGuard non viene disattivata.</string>
+    <string name="msg_wg_identity_renewed_title">Dispositivo VPN registrato di nuovo</string>
+    <string name="msg_wg_identity_renewed">%1$s non riconosceva più questo dispositivo, quindi TrackerControl ne ha registrato uno nuovo e ha aggiornato i profili %1$s su questo dispositivo.</string>
+    <!-- Ends in a full stop: msg_wg_blocked_detail appends a sentence after it. -->
+    <string name="msg_wg_provider_rejected">%1$s ha rifiutato di configurare questo dispositivo: %2$s.</string>
+    <string name="msg_wg_account_expired">%1$s segnala che questo account non ha più tempo residuo, quindi nessun server accetterà il tunnel finché non verrà aggiunto altro tempo.</string>
+    <string name="msg_wg_recovery_failed">WireGuard ha smesso di rispondere e TrackerControl sta cercando di riconnettersi.</string>
+    <string name="summary_log_logcat">La modalità Ricerca disattiva il blocco dei tracker. I tracker identificati vengono registrati in ADB e l\'estrazione SNI viene attivata per un migliore rilevamento dei nomi host. Recupera i log con adb logcat usando il tag \'TC-Log\'.</string>
+    <string name="msg_research_mode_notice">La modalità Ricerca è attiva. Il blocco dei tracker è disattivato. Tocca per modificare le impostazioni.</string>
+    <string name="msg_sure">Sei sicuro⋅a?</string>
+    <string name="msg_started">In ascolto di tracker…</string>
+    <string name="msg_waiting">In attesa di eventi</string>
+    <string name="msg_disabled">Utilizzare l\'interruttore qui sopra per attivare TrackerControl.</string>
+    <string name="msg_revoked">TrackerControl è stato disconnesso, probabilmente da un\'altra app VPN o dal sistema. Tocca per riconnettere.</string>
+    <string name="msg_installed">Problemi con %1$s?</string>
+    <string name="msg_installed_description">Consenti all\'app di contattare le aziende</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="msg_installed_tracker_libraries_found" tools:ignore="PluralsCandidate">Contiene %d librerie tracker</string>
+    <string name="msg_completed">Azione completata</string>
+    <string name="msg_no_file_manager">Nessun gestore di file trovato per selezionare un file.</string>
+    <string name="msg_no_browser">Nessuna app browser trovata per aprire il link.</string>
+    <string name="msg_vpn">TrackerControl utilizza una VPN locale per filtrare il traffico di rete. 
+Per questa ragione, è necessario consentire la connessione VPN nella prossima schermata.
+Il tuo traffico di rete non è inoltrato verso un server remoto, ma viene monitorato localmente sul tuo smartphone.</string>
+    <string name="msg_autostart">TrackerControl non può essere avviato automaticamente. Ciò è probabilmente dovuto a un bug nella tua versione di Android.</string>
+    <string name="msg_error">Si è verificato un errore imprevisto: \'%s\'</string>
+    <string name="msg_native_fd_recovery_exhausted">La VPN ha esaurito ripetutamente i descrittori di file. La protezione si è interrotta dopo il fallimento di tutti i tentativi di riavvio automatico.</string>
+    <string name="msg_native_fd_error">La VPN ha esaurito i descrittori di file. Chiudi le app non utilizzate o riavvia il dispositivo, poi riavvia la protezione.</string>
+    <string name="msg_vpn_replacement_recovery_exhausted">TrackerControl non è riuscito a ristabilire la VPN. Il traffico viene bloccato.</string>
+    <string name="msg_doh_unreachable">Il DNS sicuro (DoH) non è raggiungibile nonostante tu abbia una connessione internet attiva. Se accade ripetutamente, valuta di disattivarlo nelle impostazioni di rete.</string>
+    <string name="msg_start_failed">Android ha impedito l\'avvio del servizio VPN. Questo è probabilmente dovuto a un bug nella tua versione di Android.</string>
+    <string name="msg_try">Prova TrackerControl</string>
+    <string name="msg_log_disabled">La registrazione del traffico è disattivata, utilizzare l\'interruttore sopra per attivarla. La registrazione del traffico potrebbe aumentare il consumo della batteria.</string>
+    <string name="msg_clear_activity">Questo rimuove l\'attività registrata per questa app. Le impostazioni di blocco/consenso per singolo tracker di questa app vengono mantenute.</string>
+    <string name="msg_update_last">Ultimo aggiornamento: %s</string>
+    <string name="msg_metered">La rete è a consumo</string>
+    <string name="msg_inactive">Nessuna connessione internet attiva</string>
+    <string name="msg_queue">TrackerControl è occupato</string>
+    <string name="msg_update">Aggiornamento disponibile, clicca per scaricare</string>
+    <string name="title_version">Versione %1$d</string>
+    <string name="msg_push">I messaggi in entrata (push) sono per la maggior parte gestiti dal componente di sistema Play Services, al quale è consentito l\'accesso a internet in modo predefinito</string>
+    <string name="msg_system">La gestione di tutte le applicazioni (sistema) può essere attivata nelle impostazioni</string>
+    <string name="msg_vpn_cancelled">Connessione VPN annullata\nHai configurato un\'altra VPN in modalità sempre attiva?</string>
+    <string name="msg_unavailable">Questa funzione non è disponibile in questa versione di Android</string>
+    <string name="msg_always_on">Un\'altra VPN è impostata come sempre attiva</string>
+    <string name="msg_always_on_lockdown">Disattiva \"Blocca connessioni senza VPN\" nelle impostazioni VPN di Android per usare TrackerControl</string>
+    <string name="msg_start_forward">Inizia l\'inoltro da %1$s porta %2$d a %3$s:%4$d di \'%5$s\'?</string>
+    <string name="msg_stop_forward">Interrompere l\'inoltro di %1$s porta %2$d?</string>
+    <string name="msg_log_logcat">Attenzione: Blocco disabilitato a causa del logging ADB.</string>
+    <string-array name="protocolNames">
+        <item>UDP</item>
+        <item>TCP</item>
+    </string-array>
+    <string name="menu_add">Aggiungi</string>
+    <string name="menu_delete">Elimina</string>
+    <string name="setting_forwarding">Port forwarding</string>
+    <string name="title_protocol">Protocollo</string>
+    <string name="title_dport">Porta di origine</string>
+    <string name="title_raddr">Indirizzo Destinazione</string>
+    <string name="title_rport">Porta destinazione</string>
+    <string name="title_ruid">App destinazione</string>
+    <string name="title_external">Per un server esterno selezionare \'nobody\'</string>
+    <string name="title_unmetered_allowed">Il traffico non a consumo è consentito</string>
+    <string name="title_unmetered_blocked">Il traffico non a consumo è bloccato</string>
+    <string name="title_unmetered_disabled">Le regole per il traffico non a consumo non sono applicate</string>
+    <string name="title_metered_allowed">Il traffico a consumo è consentito</string>
+    <string name="title_metered_blocked">Il traffico a consumo è bloccato</string>
+    <string name="title_metered_disabled">Le regole per il traffico a consumo non sono applicate</string>
+    <string name="title_host_allowed">L\'indirizzo è consentito</string>
+    <string name="title_host_blocked">L\'indirizzo è bloccato</string>
+    <string name="title_interactive_allowed">Consenti quando lo schermo è acceso</string>
+    <string name="title_roaming_blocked">Blocca quando in roaming</string>
+    <string name="title_metered">Per impostazione predefinita, le connessioni Wi-Fi sono considerate non a consumo e le connessioni mobili a consumo</string>
+    <string name="title_rate">Valuta</string>
+    <string name="title_allow">Consenti</string>
+    <string name="title_block">Blocca</string>
+    <string name="title_nobody">nessuno</string>
+    <string name="title_log_whois">Whois %1$s</string>
+    <string name="title_log_port">Porta %1$d</string>
+    <string name="title_log_copy">Copia</string>
+    <!-- App Overview -->
+    <string name="tracked_app_icon">Disabilita l\'accesso a Internet per questa applicazione</string>
+    <string name="tracked_app_name">Nome applicazione</string>
+    <!-- Dynamic content descriptions for the app-icon Internet toggle in the app list (issue #231) -->
+    <string name="toggle_block_internet_description">Blocca Internet accesso per %1$s</string>
+    <string name="toggle_allow_internet_description">Consenti Internet accesso per %1$s</string>
+    <string name="toggle_no_internet_description">%1$s non ha accesso a Internet</string>
+    <string name="toggle_internet_unavailable_description">Controllo dell\'accesso a Internet non disponibile per %1$s</string>
+    <!-- Dynamic content description for the per-category tracker-blocking switch -->
+    <string name="toggle_block_category_description">Tracker blocco per categoria %1$s</string>
+    <!-- Dynamic content description for the home-screen widget toggle (accessibility follow-up, issue #636) -->
+    <string name="widget_toggle_enable_description">Abilita tracker blocco</string>
+    <string name="widget_toggle_disable_description">Disattiva il blocco dei tracker</string>
+    <string name="accessibility_tracker_blocking_enabled">Tracker blocco abilitato</string>
+    <string name="accessibility_tracker_blocking_disabled">Tracker blocco disabilitato</string>
+    <plurals name="n_companies_found_week">
+        <item quantity="one">ha contattato %d azienda la settimana scorsa</item>
+        <item quantity="other">ha contattato %d aziende la settimana scorsa</item>
+    </plurals>
+    <plurals name="n_companies_found">
+        <item quantity="one">ha contattato %d azienda in totale</item>
+        <item quantity="other">ha contattato %d aziende in totale</item>
+    </plurals>
+    <string name="confirm_ipinfo_title">Recupera informazioni sull\'organizzazione?</string>
+    <string name="confirm_ipinfo">Questo contatterà il servizio esterno ipinfo.io, e condividerà con esso dati sugli indirizzi IP contattati.</string>
+    <string name="external_servers">Ottenere automaticamente l\'email dello sviluppatore?</string>
+    <string name="confirm_google_info">Questa applicazione può ottenere automaticamente l\'email dello sviluppatore dell\'applicazione dal Google Play Store per te.</string>
+    <string name="ok">OK</string>
+    <string name="yes">Si</string>
+    <string name="no">No</string>
+    <string name="menu_csv">Esporta come CSV</string>
+    <string name="exporting">Esportazione in corso..</string>
+    <string name="export_failed">Esportazione fallita</string>
+    <string name="exported">Esportato nella memoria!</string>
+    <!-- App Details -->
+    <string name="title_activity_detail">Dettagli</string>
+    <string name="tab_trackers">Tracker</string>
+    <string name="tab_countries">Paesi</string>
+    <string name="tab_actions">Diritti sui dati</string>
+    <string name="app_info">Gestisci l\'applicazione</string>
+    <!-- Actions -->
+    <string name="block_tracking">Blocca i tracker</string>
+    <string name="block_tracking_description">Molte applicazioni inviano dati a terzi, i cosiddetti tracker. TrackerControl permette di bloccare l\'invio di questi dati in modo selettivo. Tuttavia utilizzare questa applicazione giudiziosamente, poiché gli sviluppatori di applicazioni si affidano a questi servizi, in particolare per la pubblicità.</string>
+    <string name="personalised_ads">Limitare la personalizzazione</string>
+    <string name="personalised_ads_description">Android permette di limitare l\'accesso delle applicazioni all\'ID Google Advertising del tuo dispositivo. Tuttavia, le applicazioni potrebbero ignorare questa impostazione e utilizzarlo ugualmente. Possono anche continuare a rilevare questo ID per scopi di analisi, secondo le politiche di Google. Devi fidarti di Google e dell\'azienda che raccoglie i dati.</string>
+    <string name="data_managment">Gestisci dati</string>
+    <string name="data_management_description">Il Regolamento Generale sulla Protezione dei Dati (GDPR) dell\'UE consente agli utenti dell\'UE di gestire tutti i dati ad essi correlati. Questa applicazione fornisce modelli di email per contattare lo sviluppatore. Lo sviluppatore è obbligato a rispondere entro un mese.</string>
+    <string name="contacts">Contatta </string>
+    <string name="contacts_description">Se pensi che un\'applicazione violi i principi di protezione dei dati, puoi contattare direttamente gli enti responsabili.</string>
+    <string name="play_services_required">Questa è una impostazione di Google Play Services, che non è stata trovata sul tuo dispositivo.</string>
+    <string name="no_mail_service">Si prega di installare un client di posta elettronica.</string>
+    <string name="ad_settings">Modifica ora</string>
+    <string name="request_data">Richiedi dati</string>
+    <string name="request_deletion">Richiesta la cancellazione dei dati</string>
+    <string name="contact_developer">Sviluppatore</string>
+    <string name="contact_playstore">Google</string>
+    <string name="contact_officials">Funzionari UE</string>
+    <string name="google_dpo_mail">data-protection-office@google.com</string>
+    <string name="dpas_overview_url">https://edpb.europa.eu/about-edpb/board/members</string>
+    <string name="subject_request_data">Richiesta Accesso Dati GDPR</string>
+    <string name="body_request_data"><![CDATA[Alla persona responsabile:\n
+\n
+\n
+In qualità di titolare del trattamento dei dati dell\'applicazione Android %1$s (ID: %2$s), le chiedo di confermare se sta trattando dati personali che mi riguardano.\n
+In caso affermativo, vi prego di fornirmi tutte le informazioni richieste dall\'articolo 15 del regolamento generale dell\'UE sulla protezione dei dati (GDPR), tra cui:\n
+\n
+- una copia dei miei dati personali;\n
+- le finalità del trattamento;\n
+- le categorie di dati personali interessate;\n
+- i destinatari a cui divulgate i miei dati personali e le garanzie da voi fornite;\n
+- il periodo di conservazione dei miei dati personali o i criteri utilizzati per determinare tale periodo;\n
+- informazioni sulla fonte dei miei dati personali;\n
+- l\'esistenza di un processo decisionale automatizzato (inclusa la profilazione) e, in caso affermativo:\n
+    - la logica coinvolta nel processo decisionale;\n
+    - il significato e le conseguenze previste per me;\n
+    - le misure adottate per prevenire errori, pregiudizi e discriminazioni;\n
+    - spiegare come posso esprimere il mio punto di vista e contestare una decisione.\n
+\n
+ Questa richiesta si riferisce a qualsiasi trattamento dei miei dati personali da parte vostra, compresi eventuali incaricati del trattamento dei dati personali per vostro conto.\n
+\n
+Si prega di fornire la vostra risposta attraverso mezzi sicuri via e-mail. Attendo una risposta entro un mese dal ricevimento della mia richiesta.\n
+\n
+Cordiali saluti,\n\n]]></string>
+    <string name="body_delete_data"><![CDATA[Alla persona responsabile:\n
+\n
+\n
+Invoco il mio diritto alla cancellazione come specificato nell\'articolo 17 del regolamento generale dell\'UE sulla protezione dei dati (GDPR). In qualità di titolare del trattamento dei dati dell\'applicazione Android %1$s (ID: %2$s), le chiedo di cancellare senza indugio i seguenti dati personali da lei trattati che mi riguardano:\n
+- Tutti i dati:\n
+\n
+Il motivo della mia richiesta di rimozione è che ritiro o ho ritirato il mio consenso al trattamento dei dati personali. Questa richiesta si riferisce a qualsiasi trattamento dei miei dati personali da parte vostra, compresi eventuali incaricati del trattamento dei dati personali per vostro conto.\n
+\n
+Si prega di fornire la vostra risposta attraverso mezzi sicuri via e-mail. Attendo una risposta entro un mese dal ricevimento della mia richiesta.\n
+\n
+Cordiali saluti,\n\n]]></string>
+    <string name="crash_dialog_text">Mi dispiace. TrackerControl è andato in blocco. Ti dispiacerebbe inviarci un\'email con i dettagli?</string>
+    <string name="crash_dialog_comment">Hai commenti?</string>
+    <string name="instructions_monitoring_private_dns">Attiva/disattiva l\'interruttore e interagisci le applicazioni. Il DNS privato deve essere disabilitato.</string>
+    <string name="instructions_monitoring">Attiva/disattiva l\'interruttore e interagisci con le applicazioni.</string>
+    <string name="device_not_supported_title">Dispositivo non supportato</string>
+    <string name="device_not_supported_msg">Il sistema operativo del dispositivo non consente il monitoraggio ed il filtraggio delle comunicazioni di rete. Questo è necessario per il funzionamento di TrackerControl.</string>
+    <string name="launch_app">Avvia &amp; Trova tracker</string>
+    <string name="launch_app_failed">Impossibile avviare questa app</string>
+    <string name="countries">Paesi di destinazione</string>
+    <string name="countries_explanation">Scopri dove il tuo telefono invia i dati di tracciamento.\n\nLe informazioni si basano sui dati DNS e IP, potrebbero dunque essere inesatte.</string>
+    <string name="countries_loading_failed">Oops.. La mappa del paese non è stata caricata. Per favore scrivi a tc@kollnig.net come è successo.</string>
+    <string name="countries_map_highlighted">Destinazioni di tracciamento evidenziate: %1$s</string>
+    <string name="countries_map_none">Nessuna destinazione di tracciamento evidenziata.</string>
+    <string name="tracker_advertising">Pubblicità</string>
+    <string name="tracker_analytics">Statistiche sui visitatori</string>
+    <string name="tracker_content">Essenziali</string>
+    <string name="tracker_cryptomining">Cryptomining</string>
+    <string name="tracker_fingerprinting">Impronte digitali (fingerprinting)</string>
+    <string name="tracker_social">Rete sociale (social)</string>
+    <string name="tracker_email">Email</string>
+    <string name="tracker_consent">Gestione del consenso</string>
+    <string name="tracker_uncategorised">Senza categoria</string>
+    <string name="setting_blocking_mode">Blocco Modalità</string>
+    <string name="summary_blocking_mode_minimal">Minimo: blocca solo i tracker dell\'elenco DuckDuckGo che è sicuro bloccare. I browser restano instradati attraverso la VPN, ma la protezione dai tracker è disattivata per impostazione predefinita. Le app note come incompatibili sono escluse. Malfunzionamenti limitati delle app.</string>
+    <string name="summary_blocking_mode_standard">Standard: blocca tutti i tracker noti da più elenchi (X-Ray, Disconnect, DuckDuckGo). I servizi essenziali sono consentiti. Se un\'app smette di funzionare, modifica la sua impostazione di Protezione (vedi Risoluzione problemi nel menu dell\'app).</string>
+    <string name="summary_blocking_mode_strict">Rigoroso: blocca tutti i tracker noti, inclusi i servizi essenziali e i domini ambigui con IP condiviso. Molte app richiederanno un\'impostazione di Protezione meno restrittiva (vedi Risoluzione problemi nel menu dell\'app).</string>
+    <string name="summary_sni_wg_note">Nota: l\'estrazione SNI non si applica al traffico instradato attraverso la VPN remota.</string>
+    <string name="blocking_mode_minimal">Minimo</string>
+    <string name="blocking_mode_strict">Rigoroso</string>
+    <string name="onboarding_blockingmode_title">Scegli Blocco Modalità</string>
+    <string name="onboarding_blockingmode_desc">Scegli come TrackerControl deve gestire i tracker. Le modalità di blocco fermano i tracker a diversi livelli di aggressività; la modalità Ricerca mantiene il blocco disattivato e abilita l\'estrazione SNI solo per le misurazioni. Potrai cambiarla in seguito nelle Impostazioni.</string>
+    <string name="onboarding_blockingmode_minimal_label">Minimo (consigliato ai nuovi utenti)</string>
+    <string name="onboarding_blockingmode_minimal_desc">Blocca solo i tracker confermati che è sicuro bloccare. Malfunzionamenti limitati delle app. Adatto alla maggior parte degli utenti.</string>
+    <string name="onboarding_blockingmode_standard_desc">Blocca tutti i tracker noti da più elenchi. Alcune app potrebbero richiedere un\'impostazione di Protezione meno restrittiva.</string>
+    <string name="onboarding_blockingmode_strict_label">Rigoroso</string>
+    <string name="onboarding_blockingmode_strict_desc">Blocca tutto, inclusi i servizi essenziali e i domini ambigui. Gravi malfunzionamenti delle app: molte richiederanno un\'impostazione di Protezione meno restrittiva.</string>
+    <string name="onboarding_blockingmode_research_label">Ricerca</string>
+    <string name="onboarding_blockingmode_research_desc">Nessun blocco dei tracker. Registra le trasmissioni su ADB e abilita l\'estrazione SNI per un migliore rilevamento dei nomi host. Solo per ricerca: questo rivela il tuo indirizzo IP ai server dei tracker.</string>
+    <!-- Per-app remote VPN routing -->
+    <string name="setting_wg_route_mode">Instrada tramite VPN remota</string>
+    <string name="summary_wg_route_mode">Quali app vengono inoltrate attraverso la VPN remota. Quelle che non lo sono restano completamente monitorate e filtrate — si connettono semplicemente dalla rete di questo dispositivo.</string>
+    <string name="wg_route_mode_all">Tutte le app</string>
+    <string name="wg_route_mode_selected">Solo le app selezionate</string>
+    <string name="app_route_through">Tramite la VPN remota</string>
+    <string name="app_route_through_explanation">Questa app si connette tramite la tua VPN remota, che vede il suo traffico al posto della tua rete.</string>
+    <string name="app_route_direct">Direttamente da questo dispositivo</string>
+    <string name="app_route_direct_explanation">Questa app si connette dalla tua rete. Il monitoraggio e il blocco dei tracker continuano ad applicarsi. Le sue richieste DNS vanno al resolver della tua rete anziché a quello della VPN, e l\'app vede l\'indirizzo reale di questo dispositivo — alcune app ne hanno bisogno, per esempio per raggiungere dispositivi locali o verificare un captive portal.</string>
+    <string name="app_route_unavailable_no_vpn">Non è configurata alcuna VPN remota, quindi tutto il traffico esce già direttamente da questo dispositivo.</string>
+    <string name="app_route_unavailable_bypassed">Questa app ignora completamente TrackerControl, quindi non c\'è traffico da instradare.</string>
+    <string name="app_route_unavailable_partial_routes">La tua VPN remota non trasporta tutto il traffico (i suoi AllowedIPs non formano un tunnel completo). L\'instradamento per app richiede un tunnel completo, perché le rotte sono condivise da tutte le app.</string>
+    <!-- Per-app protection state -->
+    <string name="app_state_heading">Blocco modalità</string>
+    <string name="app_state_title_minimal">Minimo blocco</string>
+    <string name="app_state_title_standard">Standard blocco</string>
+    <string name="app_state_title_strict">Rigoroso blocco</string>
+    <string name="app_state_subtitle_misbehaving">L\'app non funziona bene? Passa qui al blocco Minimo.</string>
+    <string name="app_state_protected">Protetta</string>
+    <string name="app_state_protected_explanation">I tracker vengono bloccati e registrati per questa app.</string>
+    <string name="app_state_essential_only">Minimo blocco solo</string>
+    <string name="app_state_essential_only_explanation">Blocca solo i tracker confermati che la modalità Minimo blocca. Gli altri tracker sono comunque registrati, ma consentiti. Usa questa opzione se il blocco standard compromette l\'app.</string>
+    <string name="app_state_trackers_allowed">Tracker consentiti</string>
+    <string name="app_state_trackers_allowed_explanation">L\'app continua a passare per TrackerControl, ma i suoi tracker non vengono né bloccati né registrati. Usa questa opzione se il blocco impedisce all\'app di funzionare.</string>
+    <string name="app_state_no_internet">Nessuna connessione</string>
+    <string name="app_state_no_internet_explanation">Tutte le connessioni di questa app sono bloccate. Puoi anche toccare l\'icona dell\'app nella schermata principale.</string>
+    <string name="app_state_no_internet_shared_uid">Vale anche per %1$s, che condivide un ID utente Android con questa app.</string>
+    <string name="app_state_bypassed">Ignora TrackerControl</string>
+    <string name="app_state_bypassed_explanation">L\'app si connette direttamente, al di fuori di TrackerControl. Per essa non viene monitorato né bloccato nulla. Usa questa opzione come ultima risorsa se l\'app continua a non funzionare.\n\nNota: \"Blocca connessioni senza VPN\" nelle impostazioni VPN di Android deve essere DISATTIVATO perché funzioni.</string>
+    <!-- Per-app protection screen -->
+    <string name="protection_title">Protezione</string>
+    <string name="protection_route_heading">Remoto VPN</string>
+    <!-- Protection state and remote-VPN routing shown together on one row -->
+    <string name="protection_app_not_working">L\'app non funziona? Tocca qui</string>
+    <plurals name="protection_paused_resumes">
+        <item quantity="one">In pausa — riprende tra %d minuto</item>
+        <item quantity="other">In pausa — riprende tra %d minuti</item>
+    </plurals>
+    <string name="protection_resume">Riprendi ora</string>
+    <string name="protection_pause_shared_uid">Mettere in pausa questa app mette in pausa anche %1$s perché condividono un ID utente Android.</string>
+    <string name="protection_pause_lockdown_warning">Il lockdown di Android è attivo. Mettere in pausa questa app bloccherà le sue connessioni finché la protezione non riprende.</string>
+    <string name="protection_lockdown_note">Android non espone qui lo stato del lockdown. Se &quot;Blocca connessioni senza VPN&quot; è attivo, un\'app in pausa potrebbe perdere l\'accesso alla rete.</string>
+    <string name="protection_blocked_last_24h">Bloccati nelle ultime 24 ore</string>
+    <string name="protection_no_blocked_trackers">Di recente non è stato bloccato nulla — probabilmente non è TrackerControl.</string>
+    <string name="protection_recording_unavailable">La registrazione dei tracker non è disponibile perché &quot;Ricerca nuovi tracker&quot; è disattivato.</string>
+    <string name="protection_temporary">Temporaneo, mentre è in pausa</string>
+    <string name="uninstall">Disinstalla</string>
+    <string name="settings_uninstall">Impostazioni dell\'applicazione &amp; Disinstalla</string>
+    <string name="no_trackers_found_message_disabled">Attiva l\'interruttore nella schermata principale, poi avvia l\'applicazione per trovare i tracker</string>
+    <string name="no_trackers_found_message">Avvia l\'applicazione per rilevare i tracker</string>
+    <string name="no_trackers_found_action">Avvia</string>
+    <string name="no_internet_message">"Questa applicazione non ha accesso a internet. Potrebbe comunque tracciarti scambiando dati con altre applicazioni."</string>
+    <string name="no_internet">Nessun accesso a internet</string>
+    <string name="bypass_vpn_error">"Impossibile bloccare Internet mentre l'app ignora TrackerControl."</string>
+    <string name="back">Indietro</string>
+    <string name="forever_free">Gratuito per sempre</string>
+    <string name="your_privacy">La tua Privacy</string>
+    <string name="tracker_hostlist">Hosts definiti dall\'utente</string>
+    <string name="internet_blocked">Accesso a internet bloccato</string>
+    <string name="internet_unblocked">Accesso a internet non bloccato</string>
+    <string name="category_unblocked">Tracker nella categoria consentiti</string>
+    <string name="category_unblocked_warning">Consentito con questa categoria — blocca la categoria per modificare le singole aziende.</string>
+    <string name="tracking_detection_failed">Rilevamento libreria tracciante non riuscito.</string>
+    <string name="tracking_detection_failed_ram">Rilevamento libreria tracciante non riuscito. RAM insufficiente.</string>
+    <string name="tracking_detection_failed_report">Rilevamento libreria tracciante non riuscito. Per favore segnala questo problema allo sviluppatore.</string>
+    <string name="detected_trackers">Librerie di tracker rilevati: %s</string>
+    <string name="analyzing_classes_progress">Analisi delle classi… %d%%</string>
+    <string name="none">Nessuno</string>
+    <string name="trackers_static_explanation">TrackerControl rileva codice di tracking (\'librerie\') e il traffico di rete delle applicazioni.\n\nIl tracciamento che viene rilevato nel traffico di rete può essere bloccato con TrackerControl.</string>
+    <string name="trackers_static_explanation_playstore">TrackerControl rileva codice di tracking (\'librerie\') e il traffico di rete delle applicazioni.</string>
+    <string name="trackers_static_disclaimer">Nota: il rilevamento del codice di una libreria di tracker non significa che venga usata attivamente. Alcune app potrebbero aver rimosso o disattivato queste librerie, ma se ne possono comunque rilevare tracce.</string>
+    <string name="analyze_tracker_libraries">Analizza le librerie di tracker</string>
+    <string name="update_analysis">Aggiornamento analisi</string>
+    <string name="analysis_outdated_version">\n\nNota: l\'analisi si riferisce a una versione precedente dell\'app. Le librerie di tracciamento integrate potrebbero essere cambiate.</string>
+    <!-- Tracker library screen, reached from the summary row on the Trackers tab -->
+    <string name="libraries_title">Tracker librerie</string>
+    <string name="libraries_row_heading">Tracker librerie</string>
+    <string name="libraries_none_found">Nessuna libreria di tracker trovata nel codice dell\'app</string>
+    <string name="libraries_not_analysed">Non ancora analizzate</string>
+    <string name="libraries_analysing">Analisi del codice dell\'app…</string>
+    <string name="libraries_analysis_failed">Analisi non riuscita — tocca per riprovare</string>
+    <string name="libraries_outdated_suffix">%1$s (indietro app versione)</string>
+    <string name="detected_tracker_libraries_heading">Rilevate nel codice dell\'app</string>
+    <string name="tracker_libraries_source">Siti web dai dati sui tracker di Exodus Privacy</string>
+    <string name="open_tracker_website">Apri %1$s sito web</string>
+    <plurals name="libraries_found">
+        <item quantity="one">%d libreria di tracker trovata nel codice dell\'app</item>
+        <item quantity="other">%d librerie di tracker trovate nel codice dell\'app</item>
+    </plurals>
+    <string name="analysis_queued">Analisi in coda…</string>
+    <string name="blocked">BLOCCATO</string>
+    <string name="allowed">CONSENTITO</string>
+    <string name="allowed_shared_ip">Consentito — IP condiviso; abilita la modalità Rigoroso per bloccare</string>
+    <string name="tracker_monitored_minimal">Monitorato — non bloccato in Minimo modalità</string>
+    <string name="setting_domain_based_blocked">Blocco basato sul dominio</string>
+    <string name="summary_domain_based_blocking">Consente un blocco più granulare. Ancora in sviluppo.</string>
+    <string name="uncertain_entry">Le voci contrassegnate con \'*\' potrebbero essere imprecise, a causa delle limitazioni di Android. Di solito ciò significa che la stessa società utilizza lo stesso indirizzo IP in diversi domini, ma può anche significare che diverse società sono dietro lo stesso indirizzo IP (es. se utilizzano una \"rete di consegna dei contenuti\").</string>
+    <string name="browsers_not_supported">Browser rilevato ⚠️</string>
+    <string name="browsers_not_supported_explanation">Sembra essere un\'app browser.\n\nLa protezione dal tracciamento nei browser funziona meglio all\'interno del browser, dove i tracker possono essere bloccati a livello di pagina e di richiesta. TrackerControl mantiene il traffico del browser instradato attraverso il tunnel VPN/WireGuard, ma il blocco dei tracker a livello di app è disattivato per impostazione predefinita e, se attivato, può causare malfunzionamenti dei siti.</string>
+    <string name="msg_notifications">Tocca per concedere i permessi di notifica (per messaggi di errore, ecc.)</string>
+    <string name="msg_local_network">Tocca per consentire l\'accesso alla rete locale, che Android richiede come \"dispositivi nelle vicinanze\". Android 17 lo blocca per impostazione predefinita, quindi il tuo server DNS, il resolver DNS sicuro, il peer WireGuard o il proxy non possono essere raggiunti.</string>
+    <string name="msg_local_network_title">Accesso alla rete locale necessario</string>
+    <string name="msg_local_network_notify">TrackerControl non riesce a raggiungere il tuo server DNS, il resolver DNS sicuro, il peer WireGuard o il proxy, quindi la risoluzione dei nomi potrebbe non riuscire. Android 17 richiede un\'autorizzazione per questo, che Android richiede come \"dispositivi nelle vicinanze\". Tocca per aprire TrackerControl e consentirla.</string>
+    <string name="msg_private_dns_title">Il DNS privato blocca la risoluzione dei nomi</string>
+    <string name="msg_private_dns_notify">Il \"DNS privato\" di Android è impostato su %1$s e TrackerControl blocca il DNS cifrato per poter rilevare i tracker. In questa modalità Android non ripiega sul DNS normale, quindi non si caricherà nulla. Tocca per impostare il DNS privato su \"Automatico\" o \"Disattivato\" — TrackerControl offre un proprio DNS sicuro nelle Impostazioni.</string>
+    <string name="msg_private_dns_unknown_resolver">un resolver personalizzato</string>
+    <string name="msg_private_dns_row">Non si caricherà nulla: il \"DNS privato\" di Android è impostato su un resolver specifico e TrackerControl blocca il DNS cifrato per poter rilevare i tracker. Tocca per impostare il DNS privato su \"Automatico\" o \"Disattivato\" — TrackerControl offre un proprio DNS sicuro nelle Impostazioni.</string>
+    <string name="msg_private_dns_bypass_title">Il DNS privato aggira il rilevamento dei tracker</string>
+    <string name="msg_private_dns_bypass_notify">Rilevamento dei tracker disattivato: il DNS è cifrato verso %1$s, quindi le connessioni delle app non possono essere analizzate</string>
+    <string name="msg_private_dns_bypass_allowed_notify">Alcune app usano DNS cifrato; i loro contatti con i tracker sono invisibili a TrackerControl.</string>
+    <string name="setting_monitor_system">Monitora le app di sistema</string>
+    <string name="summary_monitor_system">Instrada le app di sistema (Play Services, servizi dell\'operatore, ecc.) attraverso la VPN in modo che i loro tracker vengano rilevati e bloccati, e le mostra nell\'elenco delle app.\n\nDisattivato per impostazione predefinita: escludere le app di sistema è più rispettoso della batteria, perché il loro traffico in background non riattiva più la VPN. Attivarlo è in conflitto con \"Blocca connessioni senza VPN\" nelle impostazioni VPN di Android, che deve essere DISATTIVATO.</string>
+    <!-- Onboarding -->
+    <string name="title_next">Avanti</string>
+    <string name="title_previous">Indietro</string>
+    <string name="title_finish">Ottieni Avviato</string>
+    <string name="onboarding_welcome_title">Riprendi il controllo della tua privacy</string>
+    <string name="onboarding_welcome_desc">TrackerControl è un progetto di ricerca guidato dalla comunità che ti permette di:\n\n• <b>Monitorare</b> in tempo reale la raccolta nascosta di dati da parte delle app per dispositivi mobili.\n• <b>Bloccare</b> tracker e pubblicità usando il nostro database di <b>2.000.000 di app analizzate</b>.\n• <b>Identificare</b> le aziende e i paesi di destinazione che ricevono i tuoi dati.\n\nTutta l\'analisi avviene <b>localmente sul tuo dispositivo</b> – il tuo traffico non sfugge mai al tuo controllo.</string>
+    <string name="onboarding_vpn_title">Abilita Protezione</string>
+    <string name="onboarding_vpn_desc">TrackerControl usa l\'interfaccia VPN locale di Android per analizzare il tuo traffico internet.\n\n<b>Importante:</b> non è coinvolto alcun server VPN esterno. Non vediamo i tuoi dati.</string>
+    <string name="onboarding_vpn_action">Abilita la VPN sul dispositivo</string>
+    <string name="onboarding_vpn_sure">TrackerControl non può filtrare alcun traffico senza la VPN locale. Vuoi davvero procedere senza abilitarla?</string>
+    <string name="onboarding_vpn_blocked_title">Un\'altra VPN è attiva</string>
+    <string name="onboarding_vpn_blocked_desc">Android ha impedito a TrackerControl di avviare la sua VPN locale perché un\'altra app è impostata come <b>VPN sempre attiva</b>. Apri le impostazioni VPN e disattiva la modalità sempre attiva per l\'altra VPN, poi riprova.</string>
+    <string name="onboarding_vpn_blocked_action">Apri VPN impostazioni</string>
+    <string name="onboarding_notify_title">Resta informato</string>
+    <string name="onboarding_notify_desc">Consenti le notifiche per vedere gli aggiornamenti in tempo reale e controllare la protezione direttamente dalla barra di stato.</string>
+    <string name="onboarding_notify_action">Consenti le notifiche</string>
+    <string name="onboarding_notify_sure">Senza il permesso per le notifiche non potrai vedere gli aggiornamenti in tempo reale né controllare la protezione dalla barra di stato. Vuoi davvero procedere?</string>
+    <string name="onboarding_timeline_title">Guarda riempirsi la Cronologia</string>
+    <string name="onboarding_timeline_desc">TrackerControl si apre sulla Cronologia. All\'inizio può essere vuota: le app di solito contattano i tracker solo mentre le usi.\n\nDopo aver completato la configurazione, apri alcune app, poi torna a TrackerControl per vedere l\'attività di tracciamento rilevata e bloccata.</string>
+    <string name="onboarding_lockdown_title">Impostazione lockdown VPN</string>
+    <string name="onboarding_lockdown_desc">Android dispone di un\'impostazione chiamata \"Blocca connessioni senza VPN\" che impedisce alle app di connettersi prima che TrackerControl sia pronto.\n\nSe abilitata, può impedire il caricamento delle app. Per un\'esperienza ottimale, consigliamo di mantenere questa impostazione <b>disabilitata</b>.</string>
+    <string name="onboarding_lockdown_action">Apri VPN Impostazioni</string>
+    <string name="onboarding_lockdown_sure">Procedere con il lockdown attivo può causare problemi di connettività. Vuoi davvero procedere?</string>
+    <string name="onboarding_action_disabled">Disabilitato</string>
+    <string name="onboarding_action_granted">Concesso</string>
+    <!-- Insights Screen -->
+    <string name="insights_title">Tuo Privacy Analisi</string>
+    <string name="insights_subtitle_7days">Ultimi 7 giorni</string>
+    <string name="insights_tracking_attempts">Host di tracker contattati</string>
+    <string name="insights_blocked">Bloccato</string>
+    <string name="insights_allowed">Consentito Attraverso</string>
+    <string name="insights_tracker_companies">Aziende di tracciamento</string>
+    <string name="insights_apps_with_trackers">App con tracker</string>
+    <string name="insights_pervasive_trackers">Più pervasivi tracker</string>
+    <string name="insights_top_domains">Principali tracker domini</string>
+    <!-- Joins the alternative domain names of one tracker, e.g. "example.com or example.net". Keep the surrounding spaces. -->
+    <string name="insights_domain_alias_separator">" o "</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_in_apps" tools:ignore="PluralsCandidate">in %d app</string>
+    <plurals name="insights_apps_count">
+        <item quantity="one">%d app</item>
+        <item quantity="other">in %d app</item>
+    </plurals>
+    <string name="insights_no_data">Ancora nessun dato di tracciamento. Usa le tue app e ricontrolla più tardi!</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_shocking_fact" tools:ignore="PluralsCandidate">Questa settimana le tue app hanno contattato %1$d aziende di tracciamento tramite %2$d host di tracker!</string>
+    <!-- Retained for Play Store copy; call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_share">Condividi con Amici</string>
+    <string name="insights_share_trackers_blocked">Tracker Hosts Bloccato</string>
+    <string name="insights_share_url">TrackerControl.elemento</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_share_message" tools:ignore="PluralsCandidate">Questa settimana ho bloccato %1$d host di tracker da %2$d aziende usando TrackerControl! Riprenditi la tua privacy: https://trackercontrol.org</string>
+    <!-- Retained for Play Store copy; call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_see_more">Vedi Altro →</string>
+    <!-- What's New onboarding slide (not translated) -->
+    <string name="title_blocklists">Blocklist personalizzate</string>
+    <string name="summary_manage_blocklists">Aggiungi blocklist in formato file hosts. Vengono usate quando gli elenchi di tracker integrati non identificano un dominio.</string>
+    <string name="title_add_blocklist">Aggiungi blocklist</string>
+    <string name="title_delete_blocklist">Elimina blocklist</string>
+    <string name="msg_delete_blocklist_confirm">Vuoi davvero eliminare questa blocklist?</string>
+    <string name="msg_invalid_url">Non valida URL</string>
+    <string name="msg_apply_blocklists_failed">Impossibile applicare le blocklist</string>
+    <string name="msg_last_update">Ultimo aggiornamento: %s</string>
+    <string name="blocklist_format">Inserisci un URL HTTPS per una blocklist in formato hosts (ad esempio, 0.0.0.0 ads.example.com). Le regole di filtro del browser non sono supportate.</string>
+    <string name="blocklist_minimal_notice">Le blocklist personalizzate non sono attive in modalità Minimo. Passa a Standard o Rigoroso nelle Impostazioni per usarle.</string>
+    <string name="blocklist_research_notice">Le blocklist personalizzate non sono attive mentre la modalità Ricerca è attiva. Disattiva Ricerca nelle Impostazioni per abilitare il blocco dei tracker.</string>
+    <string name="blocklist_browser_notice">La protezione dai tracker del browser è disattivata per impostazione predefinita. Attivala nella pagina dell’app del browser per usare lì le blocklist personalizzate.</string>
+    <string name="blocklist_downloading">Download delle blocklist in corso… In attesa di una connessione se offline.</string>
+    <string name="blocklist_not_downloaded">Non ancora scaricata</string>
+    <string name="blocklist_download_failed">Impossibile scaricare o applicare le blocklist. Controlla gli errori degli elenchi e riprova ad aggiornare.</string>
+    <string name="blocklist_update">Aggiorna blocklist</string>
+    <!-- Accessibility labels -->
+    <string name="switch_tracker_control_description">Tracker blocco</string>
+    <string name="blocklist_delete_description">Elimina elenco di blocco</string>
+    <string name="blocklist_enable_description">Abilita elenco di blocco %s</string>
+    <string name="log_connection_allowed">Consentito</string>
+    <string name="log_connection_blocked">Bloccato</string>
+    <string name="log_connection_other">Altre rete</string>
+    <string name="log_screen_on">Schermo su</string>
+</resources>

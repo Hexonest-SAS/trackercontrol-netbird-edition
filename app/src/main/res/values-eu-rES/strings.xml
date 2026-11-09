@@ -1,0 +1,708 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="app_description">TrackerControl-ek aplikazioek egiten duten erabilpenaren jarraipenaren datuak era ezkutuan jasotzeko egiten duten lana monitorizatu eta kontrolatzeko aukera eskaintzen die erabiltzaileei (\'tracking\' bezala ezaguna).</string>
+    <string name="app_copyright">Egile-eskubideak © 2019–2022 Konrad Kollnig\n\nTrackerControl NetGuard-en oinarritzen da, Marcel Bokhorst-ek (M66B) garatua.</string>
+    <string name="app_android">TrackerControlek Android 5.1 edo berriagoa behar du</string>
+    <string name="app_xposed">Xposedek arazo asko sortzen ditu eta horregatik agian TrackerControl Google Play Storetik ezabatu dezakete, beraz TrackerControl ezin da instalatu Xposed instalatuta dagoen artean</string>
+    <string name="app_eula">Aplikazio honen erabilera zure ardurapean dago. Aplikazio batek ezin du 100%% babesa eskaini jarraipenaren aurka.</string>
+    <string name="app_privacy"><a href="https://github.com/TrackerControl/tracker-control-android#privacy-notice">Pribatutasun politika</a> <a href="https://github.com/TrackerControl/tracker-control-android#cookie-policy">Cookie Politika</a></string>
+    <string name="app_ios"><a href="https://ios.trackercontrol.org">TrackerControl iOSerako ere erabilgarri dago</a></string>
+    <string name="channel_foreground">Martxan dauden zerbitzuak</string>
+    <string name="channel_notify">Jakinarazpen orokorrak</string>
+    <string name="channel_access">Sarbide jakinarazpenak</string>
+    <string name="menu_search">Aplikazioa bilatu</string>
+    <string name="menu_filter">Aplikazioak filtratu</string>
+    <string name="menu_app_user">Erakutsi erabiltzailearen aplikazioak</string>
+    <string name="menu_app_system">Erakutsi sistemako aplikazioak</string>
+    <string name="menu_app_nointernet">Erakutsi internet gabeko aplikazioak</string>
+    <string name="menu_app_unprotected">Erakutsi babesik gabe aplikazioak soilik</string>
+    <string name="menu_app_frozen">Erakutsi izoztuta aplikazioak</string>
+    <string name="menu_sort">Ordenatu aplikazioak</string>
+    <string name="menu_sort_name">Izenaren arabera</string>
+    <string name="menu_sort_uid">Uidaren arabera</string>
+    <string name="menu_sort_companies_week">Konpainien arabera zerrendatu (astea)</string>
+    <string name="menu_sort_companies">Enpresaren arabera</string>
+    <string name="menu_sort_by_latest_detected_tracker">Ordenatu azken detektatutako jarraitzailearen arabera</string>
+    <string name="menu_log">Trafikoaren erregistroa</string>
+    <string name="menu_settings">Ezarpenak</string>
+    <string name="menu_invite">Gonbidatu</string>
+    <string name="menu_legend">Legenda</string>
+    <string name="menu_support">Aplikazio hau babestu</string>
+    <string name="menu_log_support">Azalpena</string>
+    <string name="menu_troubleshooting">Arazoen konponketa</string>
+    <string name="menu_about">Honi buruz</string>
+    <string name="timeline_empty_disabled_title">TrackerControl desaktibatuta dago</string>
+    <string name="timeline_empty_disabled_subtitle">Gaitu TrackerControl goian eskuinean dagoen etengailuarekin. Zure aplikazioen jarraitzaile-jarduera hemen agertuko da.</string>
+    <string name="timeline_empty_enabled_title">Jarraitzaileen bila…</string>
+    <string name="timeline_empty_enabled_subtitle">Aplikazio gehienek erabiltzen ari zarenean soilik kontaktatzen dituzte jarraitzaileak. Ireki aplikazio bat eta itzuli hona — bere jarraitzaile-jarduera hemen agertuko da.</string>
+    <string name="timeline_empty_recording_off_title">Jarraitzaileen grabazioa desaktibatuta dago</string>
+    <string name="timeline_empty_recording_off_subtitle">“Aztarnari berriak bilatu” desaktibatuta dago ezarpen aurreratuetan. Jarraitzaileak blokeatzen jarraitzen dira, baina ez dira grabatzen, beraz denbora-lerro hau hutsik geratzen da. Gaitu berriro jarraitzaile-jarduera ikusteko.</string>
+    <string name="timeline_empty_recording_unavailable_title">Jarraitzaileen grabazioa ez dago erabilgarri</string>
+    <string name="timeline_empty_recording_unavailable_subtitle">TrackerControl-en bertsio honek ez du jarraitzaileen jarduera grabatzeko aukerarik ematen. Blokeoak funtzionatzen jarraitzen du, baina denbora-lerro hau hutsik geratuko da.</string>
+    <string name="timeline_open_app">Ireki aplikazio bat</string>
+    <string name="timeline_open_settings">Ireki ezarpenak</string>
+    <string name="timeline_hint_tap_entry">Aplikazioren batek ez du funtzionatzen? Sakatu bere sarrera babesa doitzeko.</string>
+    <string name="timeline_hint_dismiss">Ulertuta</string>
+    <string name="unidentified_app_uid">Identifikatu gabeko aplikazioa (UID %1$d)</string>
+    <string name="tab_timeline">Denbora-lerroa</string>
+    <string name="tab_apps">Aplikazioak</string>
+    <string name="timeline_section_last_hour">Azken ordua</string>
+    <string name="timeline_section_today">Gaur</string>
+    <string name="timeline_section_yesterday">Atzo</string>
+    <string name="timeline_section_this_week">Aste hau</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="timeline_more_trackers" tools:ignore="PluralsCandidate">+%d gehiago</string>
+    <string name="timeline_tracker_blocked">Blokeatuta</string>
+    <string name="timeline_tracker_allowed">Baimenduta</string>
+    <!-- A blocked/allowed label followed by its share of all tracking attempts. -->
+    <string name="feed_section_last_contact">azken kontaktua %s</string>
+    <plurals name="feed_show_more_companies">
+        <item quantity="one">Erakutsi %d enpresa gehiago</item>
+        <item quantity="other">Erakutsi %d enpresa gehiago</item>
+    </plurals>
+    <string name="feed_allow_company_in_app">Baimendu %1$s %2$s aplikazioan</string>
+    <string name="feed_block_company_in_app">Blokeatu %1$s %2$s aplikazioan</string>
+    <string name="feed_allowed_by_you">Zuk baimendua</string>
+    <string name="feed_allowed_shared_ip">Baimenduta · IP partekatua</string>
+    <string name="feed_monitored">Monitorizatuta</string>
+    <string name="feed_company_expanded">Zabaldua</string>
+    <string name="feed_company_collapsed">Tolestuta</string>
+    <string name="feed_essential_explainer">Aplikazioek behar dute — baimenduta, %s funtzionatzen jarrai dezan</string>
+    <string name="feed_essential_explainer_blocked">Aplikazioek behar dute — hauek blokeatzeak %s hondatu dezake</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="timeline_summary_mixed" tools:ignore="PluralsCandidate">%1$d blokeatuta · %2$d baimenduta</string>
+    <plurals name="timeline_trackers_blocked">
+        <item quantity="one">%d jarraitzaile blokeatuta</item>
+        <item quantity="other">%d jarraitzaile blokeatuta</item>
+    </plurals>
+    <plurals name="timeline_trackers_allowed">
+        <item quantity="one">%d jarraitzaile baimenduta</item>
+        <item quantity="other">%d jarraitzaile baimenduta</item>
+    </plurals>
+    <string name="troubleshooting_title">Arazoen konponketa</string>
+    <string name="troubleshooting_battery_title">Bateriaren optimizazioa</string>
+    <string name="troubleshooting_battery_desc">TrackerControl atzeko planoan funtzionatzeari uzten badio, desgaitu Androiden bateria-optimizazioa TrackerControl-entzat. Hautatu \"Aplikazio guztiak\", sakatu TrackerControl eta hautatu \"Ez optimizatu\".</string>
+    <string name="troubleshooting_battery_action">Desgaitu bateriaren optimizazioa</string>
+    <string name="troubleshooting_battery_ok">Bateriaren optimizazioa dagoeneko desgaituta dago.</string>
+    <string name="troubleshooting_datasaver_title">Datuak aurreztea</string>
+    <string name="troubleshooting_datasaver_desc">TrackerControl konektatu ezin bada Datu-aurrezlea aktibo dagoenean, baimendu mugarik gabeko datu-erabilera TrackerControl-entzat. Gaitu \"Atzeko planoko datuak\" eta \"Mugarik gabeko datu-erabilera\".</string>
+    <string name="troubleshooting_datasaver_action">Baimendu mugarik gabeko datuak</string>
+    <string name="troubleshooting_datasaver_ok">Datu-aurrezleak ez du TrackerControl mugatzen.</string>
+    <string name="troubleshooting_local_network_title">Sare lokalerako sarbidea</string>
+    <string name="troubleshooting_local_network_desc">Baimena behar da DNS zerbitzari lokalentzat, WireGuard parekoentzat eta proxyentzat.</string>
+    <string name="troubleshooting_local_network_action">Baimendu sare lokalerako sarbidea</string>
+    <string name="troubleshooting_local_network_ok">Sare lokalerako sarbidea baimenduta dago.</string>
+    <string name="troubleshooting_app_breakage_title">Aplikazio batek funtzionatzeari utzi dio</string>
+    <string name="troubleshooting_app_breakage_desc">Sakatu aplikazioa zerrenda nagusian, gero sakatu Babesa. Probatu lehenengo \"Gutxieneko blokeoa soilik\". Aplikazioak arazoak izaten jarraitzen badu, aukeratu \"Jarraitzaileak onartuta\". Erabili \"Saihestu TrackerControl\" azken baliabide gisa soilik.</string>
+    <string name="troubleshooting_categories_title">Jarraitzaile-kategoria zehatzak blokeatzea</string>
+    <string name="troubleshooting_categories_desc">Aplikazio bakoitzaren blokeoa doitu dezakezu hura sakatuta eta Aztarnariak fitxan jarraitzaile-kategoriak (adib. Estatistikak, Iragarkiak) banaka gaituz edo desgaituz.</string>
+    <string name="troubleshooting_alwayson_title">Beti aktibatuta dagoen VPNa</string>
+    <string name="troubleshooting_alwayson_desc">Androiden VPN ezarpenetan \"Blokeatu VPNrik gabeko konexioak\" (lockdown) gaituta badago, TrackerControl ezin da behar bezala funtzionatu. Desgaitu aukera hau.</string>
+    <string name="troubleshooting_alwayson_action">Ireki VPN ezarpenak</string>
+    <string name="menu_apps">Beste aplikazioak</string>
+    <string name="menu_protocol_other">Bestelakoak</string>
+    <string name="menu_traffic_allowed">Baimendutakoak</string>
+    <string name="menu_traffic_blocked">Blokeatutakoak</string>
+    <string name="menu_live">Zuzeneko eguneraketak</string>
+    <string name="menu_refresh">Freskatu</string>
+    <string name="menu_resolve">Erakutsi izenak</string>
+    <string name="menu_organization">Erakutsi erakundea</string>
+    <string name="menu_pcap_enabled">PCAP gaituta</string>
+    <string name="menu_pcap_export">PCAP exportazioa</string>
+    <string name="menu_clear">Ezabatu</string>
+    <string name="menu_clear_activity">Garbitu grabatutako jarduera</string>
+    <string name="menu_export">Esportatu</string>
+    <string name="menu_reset">Berrezarri</string>
+    <string name="menu_cleanup">Garbitu</string>
+    <string name="setting_options">Orokorra</string>
+    <string name="setting_further_options">Gehiago aukerak</string>
+    <string name="setting_pause">Automatikoki gaitu %1$s minutura</string>
+    <string name="setting_update">Bilatu eguneraketak</string>
+    <plurals name="pause">
+        <item quantity="one">Pausatu %d minutuz</item>
+        <item quantity="other">Pausatu %d minutuz</item>
+    </plurals>
+    <string name="setting_ip6">Gaitu IPv6 trafikoa</string>
+    <string name="setting_call">Desgaitu deietan</string>
+    <string name="setting_reload_onconnectivity">Birkargatu konektibitate aldaketa bakoitzean</string>
+    <string name="setting_tcp_mss_clamp">Konexio partekatuaren bateragarritasun modua</string>
+    <string name="summary_tcp_mss_clamp">Bideratu trafiko guztia TrackerControl bidez eta mugatu TCP segmentuaren tamaina, geldituta geratzen diren edo internetik ez duten konexio partekatuak konpontzeko. Sare lokalerako sarbideak ez du TrackerControl saihesten jada, eta errendimendua murriztu daiteke.</string>
+    <string name="setting_advanced_options">Aukera aurreratuak (adituentzat)</string>
+    <string name="setting_log_app">Aztarnari berriak bilatu</string>
+    <string name="setting_log_logcat">Ikerketa</string>
+    <string name="setting_handover">Pasatu VPNra etenik gabe birkargatzean</string>
+    <string name="setting_reset_usage">Berrezarri sare-erabilera</string>
+    <string name="setting_show_resolved">Erakutsi ebatzitako domeinu izenak</string>
+    <string name="setting_exclude_all_tracking">Kanporatu aplikazio guztiak jarraipenetik</string>
+    <string name="summary_exclude_all_tracking">Desgaitu jarraitzaileen monitorizazioa aplikazio guztietan. Gero aplikazio bakoitzerako berriro gaitu dezakezu.</string>
+    <string name="setting_include_all_tracking">Sartu aplikazio guztiak jarraipenean</string>
+    <string name="summary_include_all_tracking">Gaitu berriro jarraitzaileen monitorizazioa aplikazio guztietan.</string>
+    <string name="setting_block_domains">Aktibatu ostalarien fitxategia</string>
+    <string name="setting_rcode">Ostalaria blokeatzearen erantzuna: %s</string>
+    <string name="setting_vpn4">VPN IPv4: %s</string>
+    <string name="setting_vpn6">VPN IPv6: %s</string>
+    <string name="setting_dns">VPN DNS: %s</string>
+    <string name="setting_validate">Balioztatu hemen: %s</string>
+    <string name="setting_ttl">Gutxieneko DNS TTL: %s s</string>
+    <string name="setting_socks5_enabled">Erabili SOCKS5 proxya</string>
+    <string name="setting_socks5_addr">SOCKS5 helbidea: %s</string>
+    <string name="setting_socks5_port">SOCKS5 ataka: %s</string>
+    <string name="setting_socks5_username">SOCKS5 erabiltzaile-izena: %s</string>
+    <string name="setting_socks5_password">SOCKS5 pasahitza: %s</string>
+    <string name="setting_wg_enabled">Bideratu trafikoa WireGuard bidez</string>
+    <string name="setting_wg_profile">WireGuard profila</string>
+    <string name="setting_wg_profile_manage">WireGuard profil pertsonalizatuak</string>
+    <string name="setting_wg_profile_import">Inportatu WireGuard konfigurazioa</string>
+    <string name="setting_wg_profile_scan">Eskaneatu QR kodea</string>
+    <string name="setting_wg_profile_import_file">Inportatu fitxategi edo artxibotik</string>
+    <string name="setting_wg_mullvad_setup">Konfiguratu Mullvad</string>
+    <string name="setting_wg_proton_setup">Erabili Proton VPN konfigurazioa</string>
+    <string name="setting_wg_keepalive_when_screen_off">Mantendu WireGuard bizirik pantaila itzalita dagoenean</string>
+    <string name="setting_wg_profile_save">Gorde profila</string>
+    <string name="setting_wg_profile_delete">Ezabatu profila</string>
+    <string name="accessibility_wg_profile_edit">Editatu WireGuard profila %1$s</string>
+    <string name="accessibility_wg_profile_delete">Ezabatu WireGuard profila %1$s</string>
+    <string name="setting_wireguard">WireGuard (aurrebista)</string>
+    <string name="setting_wg_status">Egoera</string>
+    <string name="setting_vpn_key_rotate_now">Biratu VPN hornitzailearen gakoak orain</string>
+    <string name="setting_pcap_record_size">PCAP grabazioaren tamaina: %s B</string>
+    <string name="setting_pcap_file_size">PCAP gehieneko fitxategi-tamaina: %s MB</string>
+    <!-- Secure DNS (DoH) -->
+    <string name="setting_doh_enabled">DNS segurua (DoH)</string>
+    <string name="summary_doh_enabled">Enkriptatu DNS kontsultak DNS-over-HTTPS erabiliz. Automatikoki pausatzen da WireGuard aktibo dagoenean, kontsulta horiek WireGuard tunela erabiltzen baitute.</string>
+    <string name="warning_beta">Beta ezaugarria. Baliteke espero bezala ez funtzionatzea.</string>
+    <string name="setting_doh_endpoint">DoH amaiera-puntuaren URLa</string>
+    <string name="summary_doh_endpoint">DNS-over-HTTPS kontsultetarako HTTPS URLa</string>
+    <string name="dialog_doh_endpoint">Sartu zure DNS hornitzaileak emandako HTTPS URL osoa, hornitzailearen bide espezifikoa barne (adibidez, https://dns.quad9.net/dns-query). TrackerControl-etik kanpo utzitako aplikazioek edo beren DNS zifratua erabiltzen dutenek ezarpen hau saihesten dute.</string>
+    <string name="setting_doh_dns_fallback">DNS ordezkoa</string>
+    <string name="summary_doh_dns_fallback">Erabili DNS estandarra (enkriptatu gabea) DoH huts egiten duenean. Ordezkoak beste DNS hornitzaile bat erabil dezake. Desgaitzeak aplikazioak hondatu ditzake DoH zerbitzaria erori bada.</string>
+    <string name="msg_invalid_doh_endpoint">Sartu DNS-over-HTTPS-rako HTTPS URL oso bat, hornitzailearen bidea barne (adibidez, https://dns.quad9.net/dns-query).</string>
+    <!-- Block DNS-over-TLS (DoT) -->
+    <string name="setting_block_dot">Blokeatu Androiden DNS pribatua</string>
+    <string name="summary_block_dot">Androiden DNS pribatua gaituta dagoenean, TC-k ezin du jarraipenik detektatu eta ez dabil behar bezala.</string>
+    <string name="setting_stats_frequency">Laginaren tartea: %s ms</string>
+    <string name="setting_stats_samples">Lagin kopurua: %s s</string>
+    <string name="setting_backup">Segurtasun kopia</string>
+    <string name="setting_export">Esportatu ezarpenak</string>
+    <string name="setting_import">Inportatu ezarpenak</string>
+    <string name="setting_hosts_update">Eguneratu ostalarien fitxategia</string>
+    <string name="setting_hosts_auto_update">Eguneratu hosts automatikoki</string>
+    <string name="summary_hosts_auto_update">Eguneratu hosts fitxategia automatikoki atzeko planoan</string>
+    <string name="summary_pause">Jakinarazpenaren etenaren ostean, aktibatu automatikoki TrackerControl berriz aukeratutako minutuak pasatu ostean (idatzi 0 ezaugarri hau desgaitzeko).</string>
+    <string name="summary_update">Egiaztatu bertsio berririk dagoen GitHub-en egunean birritan</string>
+    <string name="summary_ip6">Bideratu IPv6 trafikoa TrackerControlera, selektiboki baimendu edo blokeatzeko</string>
+    <string name="summary_call">Desgaitu TrackerControl telefono deiak jaso edo egitean. Hau IP/Wi-Fi deiekin arazoak daudenean erabili daiteke.</string>
+    <string name="summary_log_app">Desaktibatu bateria gutxiago erabiltzeko. Aztarnari berriak blokeatuta jarraituko dute, baina ez dira erakutsiko.</string>
+    <string name="summary_block_domains">OHARRA: blokeatutako ostalariak ez dira UIan agertzen.</string>
+    <string name="summary_rcode">Defektuzko balioa 3 (NXDOMAIN) da, eta \'domeinua ez da existitzen\' esan nahi du.</string>
+    <string name="summary_validate">Internet konexioa 443 atakan (https) balioztatzeko erabilitako domeinuaren izena.</string>
+    <string name="summary_socks5_enabled">TCP trafikoa besterik ez da bidaliko proxy zerbitzarira</string>
+    <string name="summary_wg_enabled">Gailuaren IPa ezkutatzen du. TCP eta UDP irteera tunelatzen ditu. Aplikazioek sare-erroreak ikusiko dituzte etenaldietan — fail-closed, ez da zuzeneko konexiora pasatzen. Telefonorako zerbitzariak abiatutako konexioek agian ez dute funtzionatuko tunela inaktibo dagoen bitartean (keepalive desgaituta dago bateria aurrezteko).</string>
+    <string name="summary_wg_config">Itsatsi zure hornitzaileak emandako [Interface] / [Peer] konfigurazioa</string>
+    <string name="summary_wg_profile">Aukeratu gordetako WireGuard konfigurazio bat</string>
+    <string name="summary_wg_profile_none">Gordetako profilik ez</string>
+    <string name="summary_wg_profile_manage">Gehitu, editatu edo ezabatu WireGuard konfigurazio pertsonalizatuak</string>
+    <string name="summary_wg_keepalive_when_screen_off">Keepalive paketeak bidaltzen ditu zure WireGuard konfigurazioan ezarritako tartean, pantaila itzalita dagoenean ere. Konexio inaktiboak mozten dituzten sareetan fidagarritasuna hobetzen du, baina bateria-kontsumoa handitzen du.</string>
+    <string name="summary_wg_status_off">Itzalita</string>
+    <string name="summary_wg_status_missing_config">Itzalita — konfiguraziorik ez</string>
+    <string name="summary_wg_status_connected">Konektatuta</string>
+    <string name="summary_wg_status_handshaking">Esku-ematea…</string>
+    <string name="summary_wg_status_blocked">Blokeatuta — %s</string>
+    <string name="summary_wg_status_starting">Abiarazten</string>
+    <string name="summary_vpn_key_rotate_now">Behartu Mullvad eta IVPN WireGuard gakoen biraketa arazketarako</string>
+    <string name="msg_vpn_key_rotation_started">VPN gakoen biraketa hasi da</string>
+    <string name="msg_wg_config_invalid">WireGuard konfigurazio baliogabea: %s</string>
+    <string name="msg_wg_profile_name">Profilaren izena</string>
+    <string name="msg_wg_profile_default_name">Lehenetsia</string>
+    <string name="msg_wg_profile_saved">WireGuard profila gordeta</string>
+    <string name="msg_wg_profile_deleted">WireGuard profila ezabatuta</string>
+    <string name="msg_wg_profile_empty">Profilik ez oraindik</string>
+    <string name="msg_wg_profile_active">Aktiboa</string>
+    <string name="msg_wg_profile_set_active">Ezarri aktiboa</string>
+    <string name="msg_wg_profile_config_hint" tools:ignore="TypographyEllipsis">[Interface]\nPrivateKey = …\nAddress = …\n\n[Peer]\nPublicKey = …\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = …</string>
+    <string name="msg_wg_profile_delete_confirm">WireGuard profil hau ezabatu?</string>
+    <string name="msg_wg_profile_scan_hint">Zuzendu kamera zure VPN hornitzaileak erakusten duen WireGuard QR kodera. Eskaneatzea zure gailuan egiten da.</string>
+    <string name="msg_wg_profile_scan_no_camera">Gailu honek ez du eskaneatzeko kamerarik</string>
+    <string name="msg_wg_profile_scan_no_camera_permission">Kameraren baimena behar da QR kode bat eskaneatzeko</string>
+    <string name="msg_wg_profile_scan_failed">Ezin izan da kamera abiarazi: %1$s</string>
+    <string name="msg_wg_profile_scan_not_config">QR kode hau ez da WireGuard konfigurazio bat: %1$s</string>
+    <string name="msg_wg_profile_import_none">Ez da WireGuard konfiguraziorik aurkitu hautatutako fitxategian</string>
+    <string name="msg_wg_profile_import_failed">Ezin izan da hautatutako fitxategia irakurri: %1$s</string>
+    <plurals name="msg_wg_profile_imported">
+        <item quantity="one">%1$d WireGuard profil inportatu da</item>
+        <item quantity="other">%1$d WireGuard profil inportatu dira</item>
+    </plurals>
+    <plurals name="msg_wg_profile_import_skipped">
+        <item quantity="one">%1$d fitxategi saltatu da: ez da baliozko WireGuard konfigurazioa</item>
+        <item quantity="other">%1$d fitxategi saltatu dira: ez dira baliozko WireGuard konfigurazioak</item>
+    </plurals>
+    <string name="msg_wg_mullvad_account">Mullvad kontuaren zenbakia</string>
+    <string name="msg_wg_mullvad_recommended">Gomendatutako kokalekua</string>
+    <string name="msg_wg_mullvad_note">TrackerControl-ek Mullvad WireGuard profil bat sortzen du. Kontuaren zenbakia lokalean gordetzen da etorkizuneko Mullvad profilentzat. Tokenak ez dira gordetzen, eta hemen profila ezabatzeak ez du gailua Mullvad-etik kentzen.</string>
+    <string name="msg_wg_mullvad_generating">WireGuard profila sortzen…</string>
+    <string name="msg_wg_mullvad_failed">Mullvad konfigurazioak huts egin du: %s</string>
+    <string name="msg_wg_mullvad_countries_failed">Ezin izan dira Mullvad herrialdeak kargatu: %s</string>
+    <string name="msg_wg_proton_note">Protonen dokumentatutako hirugarrenen konfigurazioak deskarga daitezkeen WireGuard konfigurazioak erabiltzen ditu. TrackerControl-ek ez ditu zure Proton kredentzialak behar eta ezin du konfigurazioa automatikoki berritu.\n\nHasi saioa account.protonvpn.com helbidean, joan Downloads → WireGuard configuration atalera, deskargatu konfigurazio bat, ireki testu-editore batean eta kopiatu eta itsatsi hemen bere edukia.</string>
+    <string name="msg_wg_proton_open_dashboard">Ireki Proton VPN panela</string>
+    <string name="vpn_status_relay">Errelea: %s</string>
+    <string name="vpn_status_wireguard_connected">WireGuard konektatuta</string>
+    <string name="vpn_status_disconnected">Ez konektatuta</string>
+    <string name="vpn_intro_title">VPN aurrebista</string>
+    <string name="vpn_intro_body">VPN batek zure internet trafikoa beste zerbitzari baten bidez bidaltzen du. Horrek zure IP helbidea webguneetatik eta zure sare-hornitzailetik ezkutatu dezake, eta zure konexiorako herrialde bat aukeratzeko aukera ematen dizu. Fitxa hau berria da, beraz tratatu aurrebista gisa.</string>
+    <string name="vpn_intro_mullvad_body">Pribatutasunean zentratutako VPN hornitzailea. Hilean 5 €-ko kostua du eta kontu-zenbakiak erabiltzen ditu e-posta helbideen ordez. Sartu kontu-zenbaki bat eta gero aukeratu herrialde bat TrackerControl-en.</string>
+    <string name="vpn_intro_ivpn_body">Pribatutasunean zentratutako VPN hornitzailea, WireGuard onarpenarekin. Sartu IVPN kontuaren ID bat eta gero aukeratu herrialde bat TrackerControl-en.</string>
+    <string name="vpn_intro_proton_body">Deskargatu WireGuard konfigurazio bat zure Proton VPN kontutik eta itsatsi TrackerControl-en. Zure Proton kredentzialak ez dira inoiz hemen sartzen.</string>
+    <string name="vpn_intro_wireguard_body">Erabili hau jada beste VPN hornitzaile baten, zure zerbitzari propioaren edo zure lanlekuaren WireGuard konfigurazio bat baduzu.</string>
+    <string name="vpn_enter_mullvad_account">Sartu kontuaren zenbakia</string>
+    <string name="vpn_enter_ivpn_account">Sartu kontuaren ID-a</string>
+    <string name="vpn_settings">Mullvad ezarpenak</string>
+    <string name="vpn_settings_title">Mullvad ezarpenak</string>
+    <string name="vpn_ivpn_settings">IVPN ezarpenak</string>
+    <string name="vpn_ivpn_settings_title">IVPN ezarpenak</string>
+    <string name="vpn_account_number">Kontua: %s</string>
+    <string name="vpn_account_not_set">Kontua: ez ezarri</string>
+    <string name="vpn_account_show">Erakutsi</string>
+    <string name="vpn_account_hide">Ezkutatu</string>
+    <string name="vpn_account_change">Aldatu</string>
+    <string name="vpn_account_cancel">Utzi</string>
+    <string name="vpn_mullvad_intro">Sartu zure Mullvad kontuaren zenbakia. Gailu honetan gordetzen da.</string>
+    <string name="vpn_mullvad_account_note">Kontu hau Mullvad herrialde-konexioetarako erabiltzen da.</string>
+    <string name="vpn_get_mullvad_account">Lortu Mullvad kontua</string>
+    <string name="vpn_get_ivpn_account">Lortu IVPN kontua</string>
+    <string name="vpn_account_hint">Mullvad kontuaren zenbakia</string>
+    <string name="vpn_ivpn_intro">Sartu zure IVPN kontuaren ID-a. Gailu honetan gordetzen da.</string>
+    <string name="vpn_ivpn_captcha_intro">IVPN-ek CAPTCHA egiaztapena behar du WireGuard saio bat sortu aurretik.</string>
+    <string name="vpn_ivpn_account_hint">IVPN kontuaren ID-a</string>
+    <string name="vpn_ivpn_captcha_hint">CAPTCHA testua</string>
+    <string name="vpn_account_save">Gorde</string>
+    <string name="vpn_account_saved">Kontua gordeta</string>
+    <string name="vpn_no_wireguard_profiles">WireGuard profil pertsonalizaturik ez oraindik</string>
+    <string name="vpn_import_wireguard_profile">Inportatu WireGuard profila</string>
+    <string name="vpn_manage_wireguard_profiles">Kudeatu WireGuard profilak</string>
+    <string name="vpn_country_load_failed">Ezin izan dira %1$s herrialdeak kargatu: %2$s</string>
+    <string name="vpn_country_load_failed_short">Ezin izan dira herrialdeak kargatu</string>
+    <string name="vpn_choose_country_first">Aukeratu herrialde bat lehenik</string>
+    <string name="vpn_choose_profile_first">Aukeratu WireGuard profil bat lehenik</string>
+    <string name="vpn_setup_required">Konfiguratu Mullvad edo inportatu WireGuard profil bat lehenik</string>
+    <string name="vpn_loading_countries">Herrialdeak kargatzen…</string>
+    <string name="vpn_generating">WireGuard profila sortzen…</string>
+    <string name="vpn_generation_failed">VPN konfigurazioak huts egin du: %s</string>
+    <string name="vpn_retry">Berriro saiatu</string>
+    <string name="vpn_country_selected">Ados</string>
+    <string name="msg_wg_blocked_title">WireGuard tunela ez dago erabilgarri</string>
+    <string name="msg_wg_blocked">Interneterako sarbidea blokeatuta dago WireGuard tunela erabilgarri ez dagoen bitartean. Desgaitu WireGuard ezarpena berreskuratzeko.</string>
+    <!-- The cause comes first so it does not read as a tunnel that never
+         started when the detail says it stopped responding. The tail stays
+         neutral about recovery: some causes, such as a lapsed subscription,
+         never resolve on their own. Each %s already names its own remedy
+         where it has one, so this must not repeat it. -->
+    <string name="msg_wg_blocked_detail">%s Interneterako sarbidea blokeatuta jarraituko du hau konpondu arte edo WireGuard ezarpena desgaitu arte.</string>
+    <string name="msg_wg_identity_renewed_title">VPN gailua berriro erregistratu da</string>
+    <string name="msg_wg_identity_renewed">%1$s-k ez zuen gailu hau ezagutzen, beraz TrackerControl-ek berri bat erregistratu du eta gailu honetako %1$s profilak eguneratu ditu.</string>
+    <!-- Ends in a full stop: msg_wg_blocked_detail appends a sentence after it. -->
+    <string name="msg_wg_provider_rejected">%1$s(e)k uko egin dio gailu hau konfiguratzeari: %2$s.</string>
+    <string name="msg_wg_account_expired">%1$s(e)k jakinarazi du kontu honetan ez dela denborarik geratzen, beraz, ez da zerbitzaririk onartuko tunela denbora gehitu arte.</string>
+    <string name="msg_wg_recovery_failed">WireGuard-ek erantzuteari utzi dio eta TrackerControl berriro konektatzen saiatzen ari da.</string>
+    <string name="summary_log_logcat">Ikerketa moduak jarraitzaileen blokeoa desgaitzen du. Identifikatutako jarraitzaileak ADBra erregistratzen dira eta SNI erauzketa gaitzen da ostalari-izenak hobeto detektatzeko. Eskuratu erregistroak adb logcat bidez, \'TC-Log\' etiketa erabiliz.</string>
+    <string name="msg_research_mode_notice">Ikerketa modua aktibo dago. Jarraitzaileen blokeoa desgaituta dago. Sakatu ezarpenak aldatzeko.</string>
+    <string name="msg_sure">Ziur zaude?</string>
+    <string name="msg_started">Jarraitzaileen bila…</string>
+    <string name="msg_waiting">Gertaeraren zain</string>
+    <string name="msg_disabled">Erabili goiko kontrola TrackerControl aktibatzeko.</string>
+    <string name="msg_revoked">TrackerControl deskonektatu egin da, ziurrenik beste VPN aplikazio batek edo sistemak. Sakatu berriro konektatzeko.</string>
+    <string name="msg_installed">Arazoak %1$s(r)ekin?</string>
+    <string name="msg_installed_description">Baimendu aplikazioa konpainiekin kontaktatzea</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="msg_installed_tracker_libraries_found" tools:ignore="PluralsCandidate">%d aztarnari liburutegi ditu</string>
+    <string name="msg_completed">Ekintza burututa</string>
+    <string name="msg_no_file_manager">Ez da fitxategi-kudeatzailerik aurkitu fitxategi bat hautatzeko.</string>
+    <string name="msg_no_browser">Ez da nabigatzaile-aplikaziorik aurkitu esteka irekitzeko.</string>
+    <string name="msg_vpn">TrackerControlek VPN lokal bat darabil internet trafikoa iragazteko.
+Horregatik, baimendu VPN konexioa hurrengo elkarrizketa koadroan mesedez.
+Zure internet trafikoa ez da kanpo VPN zerbitzari batera bidaltzen.</string>
+    <string name="msg_autostart">TrackerControl ezin izan da automatikoki abiatu. Litekeena da zure Android bertsioaren akats baten erruz izatea.</string>
+    <string name="msg_error">Ustekabeko errorea gertatu da: \'%s\'</string>
+    <string name="msg_native_fd_recovery_exhausted">VPNak behin eta berriz fitxategi-deskribatzaileak agortu ditu. Babesa gelditu da berrabiarazte saiakera automatiko guztiek huts egin ondoren.</string>
+    <string name="msg_native_fd_error">VPNak fitxategi-deskribatzaileak agortu ditu. Itxi erabiltzen ez dituzun aplikazioak edo berrabiarazi zure gailua, eta gero berrabiarazi babesa.</string>
+    <string name="msg_vpn_replacement_recovery_exhausted">TrackerControl-ek ezin izan du VPNa berrezarri. Trafikoa blokeatzen ari da.</string>
+    <string name="msg_doh_unreachable">DNS segurua (DoH) ez dago eskuragarri, nahiz eta internet konexio aktiboa izan. Hau behin eta berriz gertatzen bada, kontuan hartu Sare ezarpenetan desgaitzea.</string>
+    <string name="msg_start_failed">Androidek uko egin dio VPN zerbitzua orain abiatzeari. Litekeena da zure Android bertsioak akats bat duelako izatea.</string>
+    <string name="msg_try">Probatu TrackerControl</string>
+    <string name="msg_log_disabled">Trafikoaren erregistroa desgaituta dago, erabili goiko botoia loga aktibatzeko. Trafikoaren erregistroak bateria kontsumoa areagotu egin dezake.</string>
+    <string name="msg_clear_activity">Honek aplikazio honen grabatutako jarduera kentzen du. Aplikazio honen jarraitzaile bakoitzaren blokeatu/baimendu ezarpenak mantentzen dira.</string>
+    <string name="msg_update_last">Azken eguneratzea: %s</string>
+    <string name="msg_metered">Sarea neurtutakoa da</string>
+    <string name="msg_inactive">Internet konexio aktiborik ez</string>
+    <string name="msg_queue">TrackerControl lanean ari da</string>
+    <string name="msg_update">Eguneraketa eskuragarri, sakatu deskargatzeko</string>
+    <string name="title_version">Bertsioa %1$d</string>
+    <string name="msg_push">Jasotako (push) mezuak gehienbat Play Services osagaiak kudeatzen ditu, eta Internet sarbidea baimentzen zaio defektuz</string>
+    <string name="msg_system">Aplikazio guztiak (sistemakoak) kudeatzea ezarpenetan gaitu daiteke</string>
+    <string name="msg_vpn_cancelled">VPN konexioa ezeztatuta\nBeste VPN bat ezarri duzu beti gaituta dagoen VPN gisa?</string>
+    <string name="msg_unavailable">Ezaugarri hau ez dago eskuragarri Android bertsio honetan</string>
+    <string name="msg_always_on">Beste VPN bat ezarri da beti gaituta dagoen VPN gisa</string>
+    <string name="msg_always_on_lockdown">Desaktibatu \"Blokeatu VPNrik gabeko konexioak\" Androiden VPN ezarpenetan TrackerControl erabiltzeko</string>
+    <string name="msg_start_forward">Hasi birbidalketa, hemendik %1$s ataka %2$d hona %3$s:%4$d - \'%5$s\'?</string>
+    <string name="msg_stop_forward">Utzi %1$s ataka %2$d birbidaltzeari?</string>
+    <string name="msg_log_logcat">Abisua: blokeatzea desgaituta dago ADB erregistroa dela eta.</string>
+    <string-array name="protocolNames">
+        <item>UDP</item>
+        <item>TCP</item>
+    </string-array>
+    <string name="menu_add">Gehitu</string>
+    <string name="menu_delete">Ezabatu</string>
+    <string name="setting_forwarding">Atakak birbidaltzea</string>
+    <string name="title_protocol">Protokoloa</string>
+    <string name="title_dport">Jatorriaren ataka</string>
+    <string name="title_raddr">Helburuaren helbidea</string>
+    <string name="title_rport">Helburuaren ataka</string>
+    <string name="title_ruid">Helburuaren aplikazioa</string>
+    <string name="title_external">Kanpo zerbitzari baterako aukeratu \'inor ez\'</string>
+    <string name="title_unmetered_allowed">Neurtu gabeko trafikoa onartzen da</string>
+    <string name="title_unmetered_blocked">Neurtu gabeko trafikoa blokeatzen da</string>
+    <string name="title_unmetered_disabled">Neurtu gabeko sareen arauak ez dira aplikatzen</string>
+    <string name="title_metered_allowed">Neurtutako trafikoa onartzen da</string>
+    <string name="title_metered_blocked">Neurtutako trafikoa blokeatzen da</string>
+    <string name="title_metered_disabled">Neurtutako sareen arauak ez dira aplikatzen</string>
+    <string name="title_host_allowed">Helbidea baimenduta dago</string>
+    <string name="title_host_blocked">Helbidea blokeatuta dago</string>
+    <string name="title_interactive_allowed">Baimendu pantaila piztuta dagoenean</string>
+    <string name="title_roaming_blocked">Blokeatu ibiltaritzan</string>
+    <string name="title_metered">Defektuz Wi-Fi konexio bat neurtu gabekotzat hartzen da eta sare mugikorra neurtutzat</string>
+    <string name="title_rate">Baloratu</string>
+    <string name="title_allow">Baimendu</string>
+    <string name="title_block">Blokeatu</string>
+    <string name="title_nobody">inor ere ez</string>
+    <string name="title_log_whois">Whois %1$s</string>
+    <string name="title_log_port">%1$d ataka</string>
+    <string name="title_log_copy">Kopiatu</string>
+    <!-- App Overview -->
+    <string name="tracked_app_icon">Desaktibatu interneterako sarrera aplikazio honi</string>
+    <string name="tracked_app_name">Aplikazioaren izena</string>
+    <!-- Dynamic content descriptions for the app-icon Internet toggle in the app list (issue #231) -->
+    <string name="toggle_block_internet_description">Blokeatu Internet sarbidea %1$s aplikazioarentzat</string>
+    <string name="toggle_allow_internet_description">Baimendu Internet sarbidea %1$s aplikazioarentzat</string>
+    <string name="toggle_no_internet_description">%1$s aplikazioak ez du Internet sarbiderik</string>
+    <string name="toggle_internet_unavailable_description">Internet sarbidearen kontrola ez dago erabilgarri %1$s aplikazioarentzat</string>
+    <!-- Dynamic content description for the per-category tracker-blocking switch -->
+    <string name="toggle_block_category_description">Jarraitzaileen blokeoa %1$s kategoriarentzat</string>
+    <!-- Dynamic content description for the home-screen widget toggle (accessibility follow-up, issue #636) -->
+    <string name="widget_toggle_enable_description">Gaitu jarraitzailea blokeatzea</string>
+    <string name="widget_toggle_disable_description">Desgaitu jarraitzaileen blokeoa</string>
+    <string name="accessibility_tracker_blocking_enabled">Jarraitzailea blokeatzea gaituta</string>
+    <string name="accessibility_tracker_blocking_disabled">Jarraitzailea blokeatzea desgaituta</string>
+    <plurals name="n_companies_found_week">
+        <item quantity="one">%d konpainia kontaktatu du azken astean</item>
+        <item quantity="other">%d konpainia kontaktatu ditu azken astean</item>
+    </plurals>
+    <plurals name="n_companies_found">
+        <item quantity="one">%d konpainia kontaktatu du denbora guztian</item>
+        <item quantity="other">%d konpainia kontaktatu ditu denbora guztian</item>
+    </plurals>
+    <string name="confirm_ipinfo_title">Erakundearen informazioa ekarri?</string>
+    <string name="confirm_ipinfo">Honek ipinfo.io zerbitzua erabiliko du eta bertara IP helbideen informazioa bidaliko du.</string>
+    <string name="external_servers">Lortu garatzailearen eposta automatikoki?</string>
+    <string name="confirm_google_info">Aplikazio honek aplikazioaren garatzaileren eposta Google Play Storetik lortu dezake.</string>
+    <string name="ok">OK</string>
+    <string name="yes">Bai</string>
+    <string name="no">Ez</string>
+    <string name="menu_csv">CSV bezala esportatu</string>
+    <string name="exporting">Esportatzen…</string>
+    <string name="export_failed">Esportazioak huts egin du</string>
+    <string name="exported">Biltegira esportatuta!</string>
+    <!-- App Details -->
+    <string name="title_activity_detail">Xehetasunak</string>
+    <string name="tab_trackers">Aztarnariak</string>
+    <string name="tab_countries">Herrialdeak</string>
+    <string name="tab_actions">Datu-eskubideak</string>
+    <string name="app_info">Aplikazioa kudeatu</string>
+    <!-- Actions -->
+    <string name="block_tracking">Aztarnariak blokeatu</string>
+    <string name="block_tracking_description">Aplikazio askok hirugarrenei datuak bidaltzen dizkiete, hauek aztarnariak dira. TrackerControlek bidalketa horiek blokeatzea ahalbidetzen du. Hala ere kontuz erabili, aplikazio-garatzaileek zerbitzu hauek erabili egiten dituzte-eta.</string>
+    <string name="personalised_ads">Mugatu pertsonalizazioa</string>
+    <string name="personalised_ads_description">Androidek zure Google Advertising IDrako atzipena aplikazioei mugatzea eskaintzen du. Hala ere, aplikazioek ezarpen honi kasurik ez egitea gerta daiteke. ID hori estatistiketarako ere erabiltzen jarraitu dezakete, Googleren politiken arabera. Googlen eta datuak jasotzen dituen enpresan konfidantza izatea eskatzen du honek.</string>
+    <string name="data_managment">Kudeatu datuak</string>
+    <string name="data_management_description">Europar Batasunaren Datuen Babeserako Araudi Orokorrak (DBAO, GDPR edo RPGD) EBko erabiltzaileek euren datuak kudeatzeko gaitasuna ematen die. Aplikazio honek garatzaileari bidaltzeko txantiloi mezuak eskaintzen dizkizu. Garatzaileak hilabeteko epean erantzun behar dizu.</string>
+    <string name="contacts">Kontaktua </string>
+    <string name="contacts_description">Aplikazio baten datuen babeserako oinarriak betetzen ez dituela uste baduzu, arduradunekin kontaktatu dezakezu.</string>
+    <string name="play_services_required">Hau Google Play Services-en ezarpen bat da, eta ez da zure gailuan aurkitu.</string>
+    <string name="no_mail_service">Instalatu eposta bezero bat.</string>
+    <string name="ad_settings">Aldatu orain</string>
+    <string name="request_data">Eskatu datuak</string>
+    <string name="request_deletion">Eskatu ezabatzeko</string>
+    <string name="contact_developer">Garatzailea</string>
+    <string name="contact_playstore">Google</string>
+    <string name="contact_officials">EBko arduradunak</string>
+    <string name="google_dpo_mail">data-protection-office@google.com</string>
+    <string name="dpas_overview_url">https://edpb.europa.eu/about-edpb/board/members</string>
+    <string name="subject_request_data">DBAO Sarrera Eskaera</string>
+    <string name="body_request_data"><![CDATA[OHARRA: NORMALEAN GARATZAILEEK MEZU HAUEK INGELESEZ JASOTZEA ESKERTZEN DUTE, BATEZ ERE ZURE HERRIALDEKOAK EZ BADIRA, HORREGATIK EZ DUGU MEZU HAU ITZULI.
+
+To Whom It May Concern:\n
+\n
+\n
+I am requesting you, as the data controller of the Android app %1$s (ID: %2$s), to confirm whether it is processing any personal data about me.\n
+If so, please provide me with all the required information stipulated in Article 15 of the EU General Data Protection Regulation (GDPR), including:\n
+\n
+• a copy of my personal data;\n
+• the purposes of the processing;\n
+• the categories of personal data concerned;\n
+• the recipients you disclose my personal data to and the safeguards you provide;\n
+• the retention period for storing my personal data or the criteria used for determining this period;\n
+• information about the source of my personal data; and\n
+• the existence of automated decision-making (including profiling), and if so:\n
+    - the logic involved in the decision-making process;\n
+    - the significance and the envisaged consequences for me;\n
+    - the steps you have taken to prevent errors, bias and discrimination; and\n
+    - explain how I can express my point of view and challenge a decision.\n
+\n
+This request relates to any processing of my personal data by you, including any processors processing personal data on behalf of you.\n
+\n
+Please provide your response through secure means by email. I look forward to receiving a response within one month of the receipt of my request.\n
+\n
+Sincerely,\n\n]]></string>
+    <string name="body_delete_data"><![CDATA[OHARRA: NORMALEAN GARATZAILEEK MEZU HAUEK INGELESEZ JASOTZEA ESKERTZEN DUTE, BATEZ ERE ZURE HERRIALDEKOAK EZ BADIRA, HORREGATIK EZ DUGU MEZU HAU ITZULI.
+
+To Whom It May Concern:\n
+\n
+\n
+I am invoking my right to erasure as specified in Article 17 of the EU General Data Protection Regulation (GDPR). I am requesting you, as the data controller of the Android app %1$s (ID: %2$s), to erase the following personal data it processes about me without undue delay:\n
+• All data.\n
+\n
+The reason for my removal request is that I withdraw or have withdrawn my consent for processing the personal data. This request relates to any processing of my personal data by you, including any processors processing personal data on behalf of you.\n
+\n
+Please provide your response through secure means by email. I look forward to receiving a response within one month of the receipt of my request.\n
+\n
+Sincerely,\n\n]]></string>
+    <string name="crash_dialog_text">Barkatu. TrackerControlek errore bat izan du. Xehetasunak bidali nahi dizkiguzu?</string>
+    <string name="crash_dialog_comment">Komentariorik?</string>
+    <string name="instructions_monitoring_private_dns">Aktibatu eta probatu aplikazio batzurekin. DNS pribatua desaktibatuta egon behar da.</string>
+    <string name="instructions_monitoring">Aktibatu eta probatu aplikazio batzurekin.</string>
+    <string name="device_not_supported_title">Gailu honekin ezin da erabili</string>
+    <string name="device_not_supported_msg">Zure gailuaren sistema eragileak ez du sare-komunikazioak monitorizatu eta filtratzen uzten. Hau beharrezkoa da TrackerControl erabiltzeko.</string>
+    <string name="launch_app">Hasi &amp; bilatu aztarnariak</string>
+    <string name="launch_app_failed">Aplikazio hau ezin da abiarazi</string>
+    <string name="countries">Helburu herrialdeak</string>
+    <string name="countries_explanation">Jakin ezazu nora bidaltzen dituen zure telefonoak datuak.\n\nInformazioa DNS eta IP eragiketetatik ateratzen da eta agian ez da guztiz zehatza.</string>
+    <string name="countries_loading_failed">Oops… huts egin du mapa kargatzeak. Idatzi tc@kollnig.net helbidera eta esan zer gertatu den mesedez.</string>
+    <string name="countries_map_highlighted">Nabarmendutako jarraipen-helburuak: %1$s</string>
+    <string name="countries_map_none">Ez dago jarraipen-helbururik nabarmenduta.</string>
+    <string name="tracker_advertising">Iragarkiak</string>
+    <string name="tracker_analytics">Estatistikak</string>
+    <string name="tracker_content">Beharrezkoak</string>
+    <string name="tracker_cryptomining">Kriptominatzea</string>
+    <string name="tracker_fingerprinting">Hatzmarkaketa</string>
+    <string name="tracker_social">Soziala</string>
+    <string name="tracker_email">Posta elektronikoa</string>
+    <string name="tracker_consent">Baimenen kudeaketa</string>
+    <string name="tracker_uncategorised">Kategoriarik gabe</string>
+    <string name="setting_blocking_mode">Blokeo modua</string>
+    <string name="summary_blocking_mode_minimal">Minimoa: DuckDuckGo zerrendako blokeatzeko seguruak diren jarraitzaileak soilik blokeatzen ditu. Nabigatzaileak VPNren bidez bideratuta jarraitzen dute, baina jarraitzaileen babesa desaktibatuta dago lehenespenez. Bateragarriak ez diren aplikazio ezagunak kanpoan geratzen dira. Aplikazioen hondatze mugatua.</string>
+    <string name="summary_blocking_mode_standard">Estandarra: zerrenda anitzetako (X-Ray, Disconnect, DuckDuckGo) jarraitzaile ezagun guztiak blokeatzen ditu. Funtsezko zerbitzuak baimenduta daude. Aplikazio batek funtzionatzeari uzten badio, doitu bere Babes ezarpena (ikus Arazoen konponketa aplikazioaren menuan).</string>
+    <string name="summary_blocking_mode_strict">Zorrotza: jarraitzaile ezagun guztiak blokeatzen ditu, funtsezko zerbitzuak eta IP partekatuko domeinu anbiguoak barne. Aplikazio askok Babes ezarpen murriztaileagoa beharko dute (ikus Arazoen konponketa aplikazioaren menuan).</string>
+    <string name="summary_sni_wg_note">Oharra: SNI erauzketa ez zaie aplikatzen urruneko VPN bidez bideratutako trafikoari.</string>
+    <string name="blocking_mode_minimal">Minimoa</string>
+    <string name="blocking_mode_standard">Estandarra</string>
+    <string name="blocking_mode_strict">Zorrotza</string>
+    <string name="onboarding_blockingmode_title">Aukeratu blokeo modua</string>
+    <string name="onboarding_blockingmode_desc">Aukeratu TrackerControl-ek jarraitzaileak nola kudeatu behar dituen. Blokeo moduek jarraitzaileak maila desberdinetan geldiarazten dituzte; Ikerketa moduak blokeoa desaktibatuta mantentzen du eta SNI erauzketa gaitzen du neurketarako soilik. Geroago aldatu dezakezu Ezarpenetan.</string>
+    <string name="onboarding_blockingmode_minimal_label">Minimoa (Erabiltzaile berrientzat gomendatua)</string>
+    <string name="onboarding_blockingmode_minimal_desc">Blokeatzeko seguruak diren baieztatutako jarraitzaileak soilik blokeatzen ditu. Aplikazioen hondatze mugatua. Erabiltzaile gehienentzat egokia.</string>
+    <string name="onboarding_blockingmode_standard_label">Estandarra</string>
+    <string name="onboarding_blockingmode_standard_desc">Zerrenda anitzetako jarraitzaile ezagun guztiak blokeatzen ditu. Aplikazio batzuek Babes ezarpen murriztaileagoa behar dezakete.</string>
+    <string name="onboarding_blockingmode_strict_label">Zorrotza</string>
+    <string name="onboarding_blockingmode_strict_desc">Dena blokeatzen du, funtsezko zerbitzuak eta domeinu anbiguoak barne. Aplikazioen hondatze handia — aplikazio askok Babes ezarpen murriztaileagoa beharko dute.</string>
+    <string name="onboarding_blockingmode_research_label">Ikerketa</string>
+    <string name="onboarding_blockingmode_research_desc">Jarraitzaileen blokeorik ez. Transmisioak ADBra erregistratzen ditu eta SNI erauzketa gaitzen du ostalari-izenak hobeto detektatzeko. Ikerketarako soilik: honek zure IP helbidea jarraitzaileen zerbitzarietara filtratzen du.</string>
+    <!-- Per-app remote VPN routing -->
+    <string name="setting_wg_route_mode">Urruneko VPN bidez bideratu</string>
+    <string name="summary_wg_route_mode">Zein aplikazio bidaltzen diren urruneko VPN bidez. Gainerakoak guztiz monitorizatuta eta iragazita jarraitzen dute — gailu honen sare propiotik konektatzen dira, besterik ez.</string>
+    <string name="wg_route_mode_all">Aplikazio guztiak</string>
+    <string name="wg_route_mode_selected">Hautatutako aplikazioak bakarrik</string>
+    <string name="app_route_through">Urruneko VPN bidez</string>
+    <string name="app_route_through_explanation">Aplikazio hau zure urruneko VPN bidez konektatzen da, eta hark ikusten du bere trafikoa zure sarearen ordez.</string>
+    <string name="app_route_direct">Zuzenean gailu honetatik</string>
+    <string name="app_route_direct_explanation">Aplikazio hau zure sare propiotik konektatzen da. Jarraitzaileen monitorizazioa eta blokeoa indarrean daude oraindik. Bere DNS kontsultak zure sarearen ebazlera doaz, ez VPNarenera, eta gailu honen benetako helbidea ikusten du — aplikazio batzuek hori behar dute, adibidez tokiko gailuetara iristeko edo captive portal bat egiaztatzeko.</string>
+    <string name="app_route_unavailable_no_vpn">Ez dago urruneko VPNrik konfiguratuta, beraz trafiko guztia dagoeneko zuzenean ateratzen da gailu honetatik.</string>
+    <string name="app_route_unavailable_bypassed">Aplikazio honek TrackerControl guztiz saihesten du, beraz ez dago bideratzeko trafikorik.</string>
+    <string name="app_route_unavailable_partial_routes">Zure urruneko VPNak ez du trafiko guztia garraiatzen (bere AllowedIPs ez da tunel osoa). Aplikazioz aplikazioko bideratzeak tunel osoa behar du, ibilbideak aplikazio guztien artean partekatzen baitira.</string>
+    <!-- Per-app protection state -->
+    <string name="app_state_heading">Blokeo modua</string>
+    <string name="app_state_title_minimal">Gutxieneko blokeoa</string>
+    <string name="app_state_title_standard">Blokeo estandarra</string>
+    <string name="app_state_title_strict">Blokeo zorrotza</string>
+    <string name="app_state_subtitle_misbehaving">Aplikazioak ez du ongi funtzionatzen? Aldatu hemen Gutxieneko blokeora.</string>
+    <string name="app_state_protected">Babestuta</string>
+    <string name="app_state_protected_explanation">Aplikazio honetarako jarraitzaileak blokeatu eta erregistratzen dira.</string>
+    <string name="app_state_essential_only">Gutxieneko blokeoa soilik</string>
+    <string name="app_state_essential_only_explanation">Minimoa moduak blokeatzen dituen baieztatutako jarraitzaileak soilik blokeatzen ditu. Beste jarraitzaileak grabatzen dira oraindik, baina baimenduta. Erabili hau blokeo estandarrak aplikazioa hondatzen badu.</string>
+    <string name="app_state_trackers_allowed">Jarraitzaileak onartuta</string>
+    <string name="app_state_trackers_allowed_explanation">Aplikazioak TrackerControl bidez jarraitzen du, baina bere jarraitzaileak ez dira ez blokeatzen ez erregistratzen. Erabili hau blokeatzeak aplikazioa hondatzen badu.</string>
+    <string name="app_state_no_internet">Internetik ez</string>
+    <string name="app_state_no_internet_explanation">Aplikazio honen konexio guztiak blokeatuta daude. Pantaila nagusiko aplikazioaren ikonoa ere uki dezakezu.</string>
+    <string name="app_state_no_internet_shared_uid">%1$s aplikazioari ere aplikatzen zaio, Android erabiltzaile-ID bera partekatzen baitu honekin.</string>
+    <string name="app_state_bypassed">Saihestu TrackerControl</string>
+    <string name="app_state_bypassed_explanation">Aplikazioa zuzenean konektatzen da, TrackerControletik kanpo. Ez zaio ezer monitorizatzen ez blokeatzen. Erabili hau azken aukera gisa aplikazioak oraindik funtzionatzen ez badu.\n\nOharra: Androiden VPN ezarpenetako \"Blokeatu VPNrik gabeko konexioak\" DESAKTIBATUTA egon behar da hau funtziona dezan.</string>
+    <!-- Per-app protection screen -->
+    <string name="protection_title">Babesa</string>
+    <string name="protection_route_heading">Urruneko VPNa</string>
+    <!-- Protection state and remote-VPN routing shown together on one row -->
+    <string name="protection_app_not_working">Aplikazioak ez du funtzionatzen? Sakatu hemen</string>
+    <plurals name="protection_paused_resumes">
+        <item quantity="one">Pausatuta — %d minututan berrekingo da</item>
+        <item quantity="other">Pausatuta — %d minututan berrekingo da</item>
+    </plurals>
+    <string name="protection_resume">Berrekin orain</string>
+    <string name="protection_pause_shared_uid">Aplikazio hau pausatzeak %1$s ere pausatzen du, Android erabiltzaile-ID bera partekatzen dutelako.</string>
+    <string name="protection_pause_lockdown_warning">Androiden blokeoa (lockdown) gaituta dago. Aplikazio hau pausatzeak bere konexioak blokeatuko ditu babesa berrekin arte.</string>
+    <string name="protection_lockdown_note">Androidek ez du hemen blokeo-egoera erakusten. &quot;Blokeatu VPNrik gabeko konexioak&quot; gaituta badago, pausatutako aplikazio batek sarbidea gal dezake.</string>
+    <string name="protection_blocked_last_24h">Azken 24 orduetan blokeatuta</string>
+    <string name="protection_no_blocked_trackers">Ez da ezer blokeatu duela gutxi — ziurrenik ez da TrackerControl.</string>
+    <string name="protection_recording_unavailable">Jarraitzaileen grabazioa ez dago erabilgarri &quot;Aztarnari berriak bilatu&quot; desaktibatuta dagoelako.</string>
+    <string name="protection_temporary">Aldi baterakoa, pausatuta dagoen bitartean</string>
+    <string name="uninstall">Desinstalatu</string>
+    <string name="settings_uninstall">Aplikazioaren ezarpenak eta desinstalatzea</string>
+    <string name="no_trackers_found_message_disabled">Aktibatu pantaila nagusiko aukera, ondoren abiarazi aplikazioa aztarnariak bilatzeko</string>
+    <string name="no_trackers_found_message">Abiarazi aplikazioa aztarnariak bilatzeko</string>
+    <string name="no_trackers_found_action">Abiarazi</string>
+    <string name="no_internet_message">"Aplikazio honek ez du Interneterako sarbiderik. Hala ere beste aplikazio batzuekin datuak trukatuz jarraitu zaitzake."</string>
+    <string name="no_internet">Internet sarbiderik ez</string>
+    <string name="bypass_vpn_error">"Ezin da Internet blokeatu aplikazioak TrackerControl saihesten duen bitartean."</string>
+    <string name="back">Atzera</string>
+    <string name="forever_free">Betiko doan</string>
+    <string name="your_privacy">Zure pribatutasuna</string>
+    <string name="tracker_hostlist">Erabiltzaileak definitutako ostalariak</string>
+    <string name="internet_blocked">Internet sarbidea blokeatuta</string>
+    <string name="internet_unblocked">Internet sarbidea desblokeatuta</string>
+    <string name="category_unblocked">Kategoriako aztarnariak baimenduta</string>
+    <string name="category_unblocked_warning">Kategoria desblokeatuta abisua.</string>
+    <string name="tracking_detection_failed">Huts egin du tracker liburutegia detektatzeak.</string>
+    <string name="tracking_detection_failed_ram">Huts egin du tracker liburutegia detektatzeak. Ez dago behar beste RAM.</string>
+    <string name="tracking_detection_failed_report">Huts egin du tracker liburutegia detektatzeak. Mesedez eman arazo honen berri garatzaileari.</string>
+    <string name="detected_trackers">Aztarnari liburutegiak antzeman dira: %s</string>
+    <string name="analyzing_classes_progress">Klaseak aztertzen… %d%%</string>
+    <string name="none">Bat ere ez</string>
+    <string name="trackers_static_explanation">TrackerControl-ek aztarnariak antzematen ditu kodean (\'liburutegiak\') eta aplikazioen sareko trafikoan.\n\nSareko trafikoan antzematen diren aztarnariak TrackerControl-ekin blokeatu daitezke.</string>
+    <string name="trackers_static_explanation_playstore">TrackerControl-ek aztarnariak antzematen ditu kodean (\'liburutegiak\') eta aplikazioen sareko trafikoan.</string>
+    <string name="trackers_static_disclaimer">Oharra: jarraitzaile-liburutegien kodea detektatzeak ez du esan nahi aktiboki erabiltzen ari denik. Aplikazio batzuek liburutegi hauek kendu edo desgaitu izan ditzakete, baina arrastoak detektatzen jarraitu daiteke.</string>
+    <string name="analyze_tracker_libraries">Aztertu jarraitzaile-liburutegiak</string>
+    <string name="update_analysis">Eguneratu analisia</string>
+    <string name="analysis_outdated_version">\n\nOharra: azterketa aplikazioaren aurreko bertsio batekoa da. Horrek integratutako jarraipen-liburutegiak aldatu izana izan daiteke.</string>
+    <!-- Tracker library screen, reached from the summary row on the Trackers tab -->
+    <string name="libraries_title">Jarraitzaile-liburutegiak</string>
+    <string name="libraries_row_heading">Jarraitzaile-liburutegiak</string>
+    <string name="libraries_none_found">Ez da jarraitzaile-liburutegirik aurkitu aplikazioaren kodean</string>
+    <string name="libraries_not_analysed">Oraindik aztertu gabe</string>
+    <string name="libraries_analysing">Aplikazioaren kodea aztertzen…</string>
+    <string name="libraries_analysis_failed">Azterketak huts egin du — sakatu berriro saiatzeko</string>
+    <string name="libraries_outdated_suffix">%1$s (aplikazioaren aurreko bertsioa)</string>
+    <string name="detected_tracker_libraries_heading">Aplikazioaren kodean detektatuta</string>
+    <string name="tracker_libraries_source">Webguneak Exodus Privacy-ren jarraitzaile-datuetatik</string>
+    <string name="open_tracker_website">Ireki %1$s webgunea</string>
+    <plurals name="libraries_found">
+        <item quantity="one">%d jarraitzaile-liburutegi aurkitu da aplikazioaren kodean</item>
+        <item quantity="other">%d jarraitzaile-liburutegi aurkitu dira aplikazioaren kodean</item>
+    </plurals>
+    <string name="analysis_queued">Analisia ilaran…</string>
+    <string name="blocked">BLOKEATUTA</string>
+    <string name="allowed">BAIMENDUTA</string>
+    <string name="allowed_shared_ip">Baimenduta — IP partekatua; gaitu modu Zorrotza blokeatzeko</string>
+    <string name="tracker_monitored_minimal">Monitorizatuta — ez blokeatuta Minimoa moduan</string>
+    <string name="setting_domain_based_blocked">Domeinuan oinarritutako blokeatzea</string>
+    <string name="summary_domain_based_blocking">Blokeo pikordunagoa baimentzen du. Garapenean oraindik.</string>
+    <string name="uncertain_entry">Baliteke \'*\' batekin markatutako sarrerak zehatzak ez izatea, Androiden mugen eraginez. Honek gehienetan esan nahi du konpainia berdinak IP helbide berdina erabiltzen duela domeinu ezberdinetarako, baina izan daiteke ere konpainia ezberdinek IP helbide berdinaren atzean daudela (adib. CDN bat erabiltzen badute).</string>
+    <string name="browsers_not_supported">Nabigatzailea detektatuta ⚠️</string>
+    <string name="browsers_not_supported_explanation">Hau nabigatzaile-aplikazio bat dela dirudi.\n\nNabigatzailearen jarraipen-babesak nabigatzailearen barruan funtzionatzen du hobekien, non jarraitzaileak orri- eta eskaera-mailan blokea daitezkeen. TrackerControl-ek nabigatzailearen trafikoa VPN/WireGuard tunelean bideratuta mantentzen du, baina aplikazio-mailako jarraitzaileen blokeoa desaktibatuta dago lehenespenez eta guneak hondatu ditzake gaituz gero.</string>
+    <string name="msg_notifications">Sakatu jakinarazpen-baimenak emateko (errore-mezuetarako, etab.)</string>
+    <string name="msg_local_network">Sakatu sare lokalerako sarbidea baimentzeko; Androidek \"inguruko gailuak\" gisa galdetzen du. Android 17-k lehenespenez blokeatzen du, beraz zure DNS zerbitzaria, DNS seguruaren ebazlea, WireGuard parekoa edo proxya ezin dira atzitu.</string>
+    <string name="msg_local_network_title">Sare lokalerako sarbidea behar da</string>
+    <string name="msg_local_network_notify">TrackerControl-ek ezin ditu zure DNS zerbitzaria, DNS seguruaren ebazlea, WireGuard parekoa edo proxya atzitu, beraz izen-ebazpenak huts egin dezake. Android 17-k horretarako baimena eskatzen du, eta Androidek \"inguruko gailuak\" gisa galdetzen du. Sakatu TrackerControl irekitzeko eta baimentzeko.</string>
+    <string name="msg_private_dns_title">DNS pribatuak izen-ebazpena blokeatzen du</string>
+    <string name="msg_private_dns_notify">Androiden \"DNS pribatua\" honela dago ezarrita: %1$s. TrackerControl-ek enkriptatutako DNSa blokeatzen du jarraitzaileak detektatu ahal izateko. Android ez da DNS arruntera itzultzen modu honetan, beraz ez da ezer kargatuko. Sakatu DNS pribatua \"Automatikoa\" edo \"Desaktibatuta\" ezartzeko — TrackerControl-ek bere DNS segurua eskaintzen du Ezarpenetan.</string>
+    <string name="msg_private_dns_unknown_resolver">ebazle pertsonalizatu bat</string>
+    <string name="msg_private_dns_row">Ez da ezer kargatuko: Androiden \"DNS pribatua\" ebazle zehatz batera ezarrita dago, eta TrackerControl-ek enkriptatutako DNSa blokeatzen du jarraitzaileak detektatu ahal izateko. Sakatu DNS pribatua \"Automatikoa\" edo \"Desaktibatuta\" ezartzeko — TrackerControl-ek bere DNS segurua eskaintzen du Ezarpenetan.</string>
+    <string name="msg_private_dns_bypass_title">DNS pribatuak jarraitzaileen detekzioa saihesten du</string>
+    <string name="msg_private_dns_bypass_notify">Jarraitzaileen detekzioa desaktibatuta dago: DNSa enkriptatuta dago hona: %1$s, beraz aplikazioen konexioak ezin dira aztertu</string>
+    <string name="msg_private_dns_bypass_allowed_notify">Aplikazio batzuek enkriptatutako DNSa erabiltzen ari dira; haien jarraitzaile-kontaktuak ikusezinak dira TrackerControl-entzat.</string>
+    <string name="setting_monitor_system">Monitorizatu sistemako aplikazioak</string>
+    <string name="summary_monitor_system">Bideratu sistemako aplikazioak (Play Services, operadorearen zerbitzuak, etab.) VPNren bidez, haien jarraitzaileak detektatu eta blokea daitezen, eta erakutsi aplikazio-zerrendan.\n\nLehenespenez desaktibatuta: sistemako aplikazioak kanpoan uztea bateriarentzat hobea da, haien atzeko planoko trafikoak ez baitu VPNa esnatzen. Hau gaitzeak gatazka du Androiden VPN ezarpenetako \"Blokeatu VPNrik gabeko konexioak\" aukerarekin, zeinak DESGAITUTA egon behar baitu.</string>
+    <!-- Onboarding -->
+    <string name="title_next">Hurrengoa</string>
+    <string name="title_previous">Aurrekoa</string>
+    <string name="title_finish">Hasi</string>
+    <string name="onboarding_welcome_title">Hartu zure pribatutasunaren kontrola</string>
+    <string name="onboarding_welcome_desc">TrackerControl komunitateak bultzatutako ikerketa-proiektu bat da, zuri hauek egiteko aukera ematen dizuna:\n\n• <b>Monitorizatu</b> aplikazio mugikorrek ezkutuan egiten duten datu-bilketa denbora errealean.\n• <b>Blokeatu</b> jarraitzaileak eta iragarkiak gure <b>2.000.000 aplikazio aztertuen</b> datu-basea erabiliz.\n• <b>Identifikatu</b> zure datuak jasotzen dituzten helmugako enpresak eta herrialdeak.\n\nAnalisi guztia <b>zure gailuan lokalean</b> gertatzen da – zure trafikoa ez da inoiz zure kontrolpetik ateratzen.</string>
+    <string name="onboarding_vpn_title">Gaitu Babesa</string>
+    <string name="onboarding_vpn_desc">TrackerControl-ek Androiden VPN interfaze lokala erabiltzen du zure internet trafikoa aztertzeko.\n\n<b>Garrantzitsua:</b> Ez dago kanpoko VPN zerbitzaririk tartean. Ez ditugu zure datuak ikusten.</string>
+    <string name="onboarding_vpn_action">Gaitu gailuko VPNa</string>
+    <string name="onboarding_vpn_sure">TrackerControl-ek ezin du trafikorik iragazi VPN lokalik gabe. Ziur zaude hori gaitu gabe jarraitu nahi duzula?</string>
+    <string name="onboarding_vpn_blocked_title">Beste VPN bat aktibo dago</string>
+    <string name="onboarding_vpn_blocked_desc">Androidek TrackerControl-en VPN lokala abiaraztea eragotzi du, beste aplikazio bat <b>Beti aktibatuta dagoen VPNa</b> gisa ezarrita dagoelako. Ireki VPN ezarpenak eta desgaitu beti-aktibatuta aukera beste VPNarentzat, gero saiatu berriro.</string>
+    <string name="onboarding_vpn_blocked_action">Ireki VPN ezarpenak</string>
+    <string name="onboarding_notify_title">Egon informatuta</string>
+    <string name="onboarding_notify_desc">Baimendu jakinarazpenak denbora errealeko eguneraketak ikusteko eta babesa egoera-barratik zuzenean kontrolatzeko.</string>
+    <string name="onboarding_notify_action">Baimendu jakinarazpenak</string>
+    <string name="onboarding_notify_sure">Jakinarazpen-baimenik gabe, ezingo dituzu denbora errealeko eguneraketak ikusi ezta babesa egoera-barratik kontrolatu. Ziur zaude?</string>
+    <string name="onboarding_timeline_title">Ikusi Denbora-lerroa betetzen</string>
+    <string name="onboarding_timeline_desc">TrackerControl Denbora-lerroan hasten da. Hasieran hutsik egon daiteke: aplikazioek normalean erabiltzen ari zarenean soilik kontaktatzen dituzte jarraitzaileak.\n\nKonfigurazioa amaitu ondoren, ireki aplikazio batzuk eta itzuli TrackerControl-era antzemandako eta blokeatutako jarraipen-jarduera ikusteko.</string>
+    <string name="onboarding_lockdown_title">VPN blokeo ezarpena</string>
+    <string name="onboarding_lockdown_desc">Androidek \"Blokeatu VPNrik gabeko konexioak\" izeneko ezarpen bat du, aplikazioek TrackerControl prest egon aurretik konektatzea eragozten duena.\n\nGaituta badago, aplikazioek kargatzeko arazoak izan ditzakete. Ezarpen hau <b>desgaituta</b> mantentzea gomendatzen dugu esperientziarik onenerako.</string>
+    <string name="onboarding_lockdown_action">Ireki VPN Ezarpenak</string>
+    <string name="onboarding_lockdown_sure">Blokeoa gaituta jarraitzeak konektibitate arazoak sor ditzake. Ziur zaude?</string>
+    <string name="onboarding_action_disabled">Desgaituta</string>
+    <string name="onboarding_action_granted">Emandakoa</string>
+    <!-- Insights Screen -->
+    <string name="insights_title">Zure pribatutasunaren ikuspegiak</string>
+    <string name="insights_subtitle_7days">Azken 7 egunak</string>
+    <string name="insights_tracking_attempts">Kontaktatutako jarraitzaile-ostalariak</string>
+    <string name="insights_blocked">Blokeatuta</string>
+    <string name="insights_allowed">Pasatzen utzi dira</string>
+    <string name="insights_tracker_companies">Jarraipen-enpresak</string>
+    <string name="insights_apps_with_trackers">Jarraitzaileak dituzten aplikazioak</string>
+    <string name="insights_pervasive_trackers">Jarraitzaile hedatuenak</string>
+    <string name="insights_top_domains">Jarraitzaile-domeinu nagusiak</string>
+    <!-- Joins the alternative domain names of one tracker, e.g. "example.com or example.net". Keep the surrounding spaces. -->
+    <string name="insights_domain_alias_separator">" edo "</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_in_apps" tools:ignore="PluralsCandidate">%d aplikaziotan</string>
+    <plurals name="insights_apps_count">
+        <item quantity="one">%d aplikaziotan</item>
+        <item quantity="other">%d aplikaziotan</item>
+    </plurals>
+    <string name="insights_no_data">Oraindik ez dago jarraipen-daturik. Erabili zure aplikazioak eta itzuli geroago!</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_shocking_fact" tools:ignore="PluralsCandidate">Zure aplikazioek %1$d jarraipen-enpresa kontaktatu dituzte %2$d jarraitzaile-ostalarien bidez aste honetan!</string>
+    <!-- Retained for Play Store copy; call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_share">Partekatu lagunekin</string>
+    <string name="insights_share_trackers_blocked">Blokeatutako jarraitzaile-ostalariak</string>
+    <string name="insights_share_url">TrackerControl.elementua</string>
+    <!-- Keep as a string: call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_share_message" tools:ignore="PluralsCandidate">Aste honetan %1$d jarraitzaile-ostalari blokeatu ditut %2$d enpresatatik TrackerControl erabiliz! Berreskuratu zure pribatutasuna: https://trackercontrol.org</string>
+    <!-- Retained for Play Store copy; call-site/API migration and multi-count grammar are intentionally separate. -->
+    <string name="insights_see_more">Ikusi gehiago →</string>
+    <!-- What's New onboarding slide (not translated) -->
+    <string name="title_blocklists">Blokeo-zerrenda pertsonalizatuak</string>
+    <string name="summary_manage_blocklists">Gehitu blokeo-zerrendak hosts fitxategi formatuan. Integratutako jarraitzaile-zerrendek domeinu bat identifikatzen ez dutenean erabiltzen dira.</string>
+    <string name="title_add_blocklist">Gehitu blokeo-zerrenda</string>
+    <string name="title_delete_blocklist">Ezabatu blokeo-zerrenda</string>
+    <string name="msg_delete_blocklist_confirm">Ziur blokeo-zerrenda hau ezabatu nahi duzula?</string>
+    <string name="msg_invalid_url">URL baliogabea</string>
+    <string name="msg_apply_blocklists_failed">Ezin izan dira blokeo-zerrendak aplikatu</string>
+    <string name="msg_last_update">Azken eguneraketa: %s</string>
+    <string name="blocklist_format">Sartu hosts formatuko blokeo-zerrenda baten HTTPS URLa (adibidez, 0.0.0.0 ads.example.com). Ez dira onartzen nabigatzaileen iragazki-arauak.</string>
+    <string name="blocklist_minimal_notice">Blokeo-zerrenda pertsonalizatuak ez daude aktibo Minimo moduan. Aldatu Estandar edo Zorrotz moduara Ezarpenetan erabiltzeko.</string>
+    <string name="blocklist_research_notice">Blokeo-zerrenda pertsonalizatuak ez daude aktibo Ikerketa modua aktibo dagoen bitartean. Desaktibatu Ikerketa Ezarpenetan jarraitzaileen blokeoa gaitzeko.</string>
+    <string name="blocklist_browser_notice">Nabigatzailearen jarraitzaileen babesa desaktibatuta dago modu lehenetsian. Gaitu nabigatzailearen aplikazio-orrian bertan blokeo-zerrenda pertsonalizatuak erabiltzeko.</string>
+    <string name="blocklist_downloading">Blokeo-zerrendak deskargatzen… Konexioaren zain, lineaz kanpo badago.</string>
+    <string name="blocklist_not_downloaded">Oraindik ez da deskargatu</string>
+    <string name="blocklist_download_failed">Ezin izan dira blokeo-zerrendak deskargatu edo aplikatu. Egiaztatu zerrendetako akatsak eta saiatu berriro eguneratzen.</string>
+    <string name="blocklist_update">Eguneratu blokeo-zerrendak</string>
+    <!-- Accessibility labels -->
+    <string name="switch_tracker_control_description">Jarraitzailea blokeatzea</string>
+    <string name="blocklist_delete_description">Ezabatu blokeo-zerrenda</string>
+    <string name="blocklist_enable_description">Gaitu %s blokeo-zerrenda</string>
+    <string name="log_connection_allowed">Baimenduta</string>
+    <string name="log_connection_blocked">Blokeatuta</string>
+    <string name="log_connection_other">Beste sare bat</string>
+    <string name="log_screen_on">Pantaila piztuta</string>
+</resources>

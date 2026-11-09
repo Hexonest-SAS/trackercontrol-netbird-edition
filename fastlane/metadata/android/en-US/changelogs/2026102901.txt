@@ -1,0 +1,7 @@
+- Refreshed UI of Timeline, Insights, and app details
+- Choose which apps use the remote VPN
+- Import WireGuard profiles by QR code, file, or ZIP
+- More reliable VPN, DNS, tethering, and tracker detection
+- Reduced screen-off battery use
+- Updated tracker lists, translations, and dependencies
+- Many bug fixes

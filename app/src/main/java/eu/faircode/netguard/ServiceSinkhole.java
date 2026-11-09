@@ -1,0 +1,5213 @@
+/*
+ * This file is from NetGuard.
+ *
+ * NetGuard is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * NetGuard is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with NetGuard.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * Copyright © 2015–2020 Marcel Bokhorst (M66B)
+ * Copyright © 2019–2026 Konrad Kollnig
+ */
+
+package eu.faircode.netguard;
+
+import static android.app.Activity.RESULT_OK;
+import static net.kollnig.missioncontrol.DetailsActivity.INTENT_EXTRA_APP_NAME;
+import static net.kollnig.missioncontrol.DetailsActivity.INTENT_EXTRA_APP_PACKAGENAME;
+import static net.kollnig.missioncontrol.DetailsActivity.INTENT_EXTRA_APP_UID;
+import static eu.faircode.netguard.WidgetAdmin.INTENT_PAUSE;
+
+import android.app.AlarmManager;
+import android.app.ForegroundServiceStartNotAllowedException;
+import android.app.Notification;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.net.ConnectivityManager;
+import android.net.IpPrefix;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkInfo;
+import android.net.NetworkRequest;
+import android.net.TrafficStats;
+import android.net.Uri;
+import android.net.VpnService;
+import android.os.Build;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Looper;
+import android.os.Message;
+import android.os.ParcelFileDescriptor;
+import android.os.PowerManager;
+import android.os.Process;
+import android.os.SystemClock;
+import android.provider.Settings;
+import android.telephony.PhoneStateListener;
+import android.telephony.TelephonyManager;
+import android.text.TextUtils;
+import android.util.Log;
+import android.util.Pair;
+import android.util.TypedValue;
+import android.widget.RemoteViews;
+
+import androidx.annotation.RequiresApi;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
+import androidx.core.content.ContextCompat;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+import androidx.preference.PreferenceManager;
+
+import net.kollnig.missioncontrol.BuildConfig;
+import net.kollnig.missioncontrol.Common;
+import net.kollnig.missioncontrol.DetailsActivity;
+import net.kollnig.missioncontrol.R;
+import net.kollnig.missioncontrol.analysis.TrackerAnalysisManager;
+import net.kollnig.missioncontrol.data.BlockingMode;
+import net.kollnig.missioncontrol.data.BlockingModeLogic;
+import net.kollnig.missioncontrol.data.PausedApps;
+import net.kollnig.missioncontrol.data.InternetBlocklist;
+import net.kollnig.missioncontrol.data.RemoteRoutingLogic;
+import net.kollnig.missioncontrol.data.Tracker;
+import net.kollnig.missioncontrol.data.TrackerBlocklist;
+import net.kollnig.missioncontrol.data.TrackerList;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.zip.GZIPInputStream;
+
+import javax.net.ssl.HttpsURLConnection;
+
+public class ServiceSinkhole extends VpnService {
+    private static final String TAG = "TrackerControl.VPN";
+
+    private static int getIntPref(SharedPreferences prefs, String key, int def) {
+        String value = prefs.getString(key, null);
+        if (TextUtils.isEmpty(value))
+            return def;
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ex) {
+            return def;
+        }
+    }
+
+    // Safety net for the per-command wakelock: a command that hangs or throws
+    // before reaching the release in CommandHandler's finally block (or a
+    // future code path that forgets to release) auto-releases instead of
+    // holding the CPU awake indefinitely. Generously covers the slowest
+    // legitimate case (WG config parse + bounded DNS resolve + handshake +
+    // the 3s handover-retry sleep) with margin.
+    private static final long WAKELOCK_TIMEOUT_MS = 30_000L;
+
+    // Bounds the update check's network calls so a hung connection cannot stall
+    // the command handler thread (and its wakelock) for the OS default timeout.
+    private static final int UPDATE_CHECK_TIMEOUT_MS = 10_000;
+
+    private boolean registeredUser = false;
+    private boolean registeredIdleState = false;
+    private boolean registeredApState = false;
+    private boolean registeredConnectivityChanged = false;
+    private boolean registeredPackageChanged = false;
+
+    private final Runnable wgStateListener = () -> {
+        String err = net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.getLastError();
+        if (err != null) {
+            showWireGuardErrorNotification(err);
+            return;
+        }
+
+        if (!net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.isRunning()) {
+            clearWireGuardErrorNotification();
+            return;
+        }
+
+        Long hs = net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.latestHandshakeMillisOrNull();
+        if (hs != null && hs > 0 && System.currentTimeMillis() - hs < 180_000L)
+            clearWireGuardErrorNotification();
+    };
+
+    private Object networkCallback = null;
+
+    private boolean registeredInteractiveState = false;
+    private PhoneStateListener callStateListener = null;
+
+    private State state = State.none;
+    private boolean user_foreground = true;
+    private boolean last_connected = false;
+    private boolean last_metered = true;
+    private boolean last_interactive = false;
+
+    private int last_allowed = -1;
+    private int last_blocked = -1;
+    private int last_hosts = -1;
+
+    private static Object jni_lock = new Object();
+    private static long jni_context = 0;
+    private volatile Thread tunnelThread = null;
+    private ServiceSinkhole.Builder last_builder = null;
+    private volatile ParcelFileDescriptor vpn = null;
+    // Set once a tun is established, cleared when the service tears it down or
+    // is destroyed. Static, and the app is single-process, so VpnRestartWorker
+    // reads the same field - and a killed process takes it down with it, which
+    // is how the worker tells a dead VPN from a live one. It does not track a
+    // tunnel that failed underneath the service: that window belongs to the
+    // in-service recovery paths, which either restore the tunnel or stop.
+    private static volatile boolean vpnEstablished = false;
+    private boolean temporarilyStopped = false;
+
+    private static long last_hosts_modified = 0;
+    public static Map<String, Boolean> mapHostsBlocked = new ConcurrentHashMap<>();
+    private static final Map<Network, Long> mapValidated = new ConcurrentHashMap<>();
+    // Per-network connectivity-probe backoff: {lastFailureUptimeMs, backoffMs} (SystemClock.elapsedRealtime()-based).
+    // Cleared on probe success and on onLost() so a fresh Network starts unbacked-off.
+    private static final Map<Network, long[]> mapValidateFailure = new ConcurrentHashMap<>();
+    private Map<Integer, Boolean> mapUidAllowed = new HashMap<>();
+    private Map<Integer, Integer> mapUidKnown = new HashMap<>();
+    // UIDs whose routing differs from the global default. Pushed down to the
+    // packet path as a sorted array; unlisted UIDs follow the global default.
+    private Set<Integer> mapUidRouteOverride = new HashSet<>();
+    private boolean defaultTunnel = true;
+    // Resolver used by apps routed around the remote tunnel. Null when the
+    // system offers none, in which case their DNS stays in the tunnel.
+    private String directDnsTarget = null;
+    // Whether any app is routed around the tunnel, which is what makes the
+    // extra per-query DNS cost worth paying.
+    private boolean anyDirectRouting = false;
+    private Map<Integer, Forward> mapForward = new HashMap<>();
+    public static ReentrantReadWriteLock lock = new ReentrantReadWriteLock(true);
+
+    private volatile Looper commandLooper;
+    private volatile Looper logLooper;
+    private volatile Looper statsLooper;
+    private volatile CommandHandler commandHandler;
+    private volatile LogHandler logHandler;
+    private volatile StatsHandler statsHandler;
+
+    // Set at the very end of a fully successful onCreate. onCreate can
+    // stopSelf()+return early (e.g. startForeground denied on Android 12+,
+    // see ForegroundServiceStartNotAllowedException below) before the handler
+    // threads, the network monitor callback registration, or jni_init() run.
+    // onDestroy must not tear down anything past the point onCreate actually
+    // reached, or it crashes: unregistering a callback that was never
+    // registered throws IllegalArgumentException, and jni_done() on the
+    // still-zero native context segfaults (netguard.c dereferences it
+    // unconditionally).
+    private volatile boolean initialized = false;
+    private volatile boolean destroying = false;
+
+    private static final int NATIVE_RECOVERY_MAX_RETRIES = 5;
+    private static final long NATIVE_RECOVERY_INITIAL_DELAY_MS = 1_000L;
+    private static final long NATIVE_RECOVERY_STABLE_WINDOW_MS = 2 * 60_000L;
+    private final FailureRecoveryPolicy nativeRecoveryPolicy = new FailureRecoveryPolicy(
+            NATIVE_RECOVERY_MAX_RETRIES,
+            NATIVE_RECOVERY_INITIAL_DELAY_MS,
+            NATIVE_RECOVERY_STABLE_WINDOW_MS);
+    private final Handler nativeRecoveryHandler = new Handler(Looper.getMainLooper());
+    private final Runnable nativeRecoveryRunnable = () -> {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+        if (!prefs.getBoolean("enabled", false) || temporarilyStopped || vpn == null) {
+            Log.i(TAG, "Skipping native recovery because protection is no longer active");
+            return;
+        }
+
+        Log.i(TAG, "Retrying native tunnel after failure");
+        ServiceSinkhole.reload("native tunnel recovery", ServiceSinkhole.this, false);
+    };
+
+    private static final int WG_STARTUP_RECOVERY_MAX_RETRIES = 5;
+    private static final long WG_STARTUP_RECOVERY_INITIAL_DELAY_MS = 1_000L;
+    private static final long WG_STARTUP_RECOVERY_STABLE_WINDOW_MS = 2 * 60_000L;
+    private static final String EXTRA_WG_STARTUP_RETRY = "WireGuardStartupRetry";
+    private final WireGuardStartupRecoveryPolicy wgStartupRecoveryPolicy =
+            new WireGuardStartupRecoveryPolicy(
+                    WG_STARTUP_RECOVERY_MAX_RETRIES,
+                    WG_STARTUP_RECOVERY_INITIAL_DELAY_MS,
+                    WG_STARTUP_RECOVERY_STABLE_WINDOW_MS);
+    private final Object wgStartupRecoveryLock = new Object();
+    private final Handler wgStartupRecoveryHandler = new Handler(Looper.getMainLooper());
+    private final Runnable wgStartupRecoveryRunnable = () -> {
+        synchronized (ServiceSinkhole.this) {
+            synchronized (wgStartupRecoveryLock) {
+                if (!wgStartupRecoveryPolicy.claim())
+                    return;
+            }
+
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+            if (destroying || !initialized || commandHandler == null || state != State.enforcing
+                    || !user_foreground || !prefs.getBoolean("enabled", false)
+                    || temporarilyStopped || vpn == null) {
+                Log.i(TAG, "Skipping WireGuard startup recovery because protection is no longer active");
+                cancelWireGuardStartupRecovery(true);
+                return;
+            }
+            if (VpnService.prepare(ServiceSinkhole.this) != null) {
+                Log.i(TAG, "Skipping WireGuard startup recovery because VPN consent was revoked");
+                cancelWireGuardStartupRecovery(true);
+                return;
+            }
+
+            Log.i(TAG, "Queueing WireGuard startup recovery");
+            getLock(ServiceSinkhole.this).acquire(WAKELOCK_TIMEOUT_MS);
+            Intent intent = new Intent(ServiceSinkhole.this, ServiceSinkhole.class);
+            intent.putExtra(EXTRA_COMMAND, Command.reload);
+            intent.putExtra(EXTRA_REASON, "WireGuard startup recovery");
+            intent.putExtra(EXTRA_WG_STARTUP_RETRY, true);
+            intent.putExtra(EXTRA_INTERACTIVE, false);
+            commandHandler.queue(intent);
+        }
+    };
+
+    private static final int VPN_REPLACEMENT_RECOVERY_MAX_RETRIES = 5;
+    private static final long VPN_REPLACEMENT_RECOVERY_INITIAL_DELAY_MS = 1_000L;
+    // The ladder above spans about half a minute. A failure this long after the
+    // previous one is a new episode rather than a continuation of the old one,
+    // so it starts from a full budget instead of inheriting an exhausted count
+    // that only a successful replacement would otherwise clear.
+    private static final long VPN_REPLACEMENT_RECOVERY_STABLE_WINDOW_MS = 2 * 60_000L;
+    private static final String EXTRA_REPLACEMENT_RETRY = "ReplacementRetry";
+    private final FailureRecoveryPolicy vpnReplacementRecoveryPolicy =
+            new FailureRecoveryPolicy(
+                    VPN_REPLACEMENT_RECOVERY_MAX_RETRIES,
+                    VPN_REPLACEMENT_RECOVERY_INITIAL_DELAY_MS,
+                    VPN_REPLACEMENT_RECOVERY_STABLE_WINDOW_MS);
+    private final Object vpnReplacementRecoveryLock = new Object();
+    private final AtomicBoolean vpnReplacementRecoveryPending = new AtomicBoolean(false);
+    private final Runnable vpnReplacementRecoveryRunnable = () -> {
+        synchronized (vpnReplacementRecoveryLock) {
+            if (!vpnReplacementRecoveryPending.compareAndSet(true, false))
+                return;
+        }
+
+        synchronized (ServiceSinkhole.this) {
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+            if (destroying || !initialized || commandHandler == null || state != State.enforcing
+                    || !user_foreground || !prefs.getBoolean("enabled", false)
+                    || temporarilyStopped || vpn == null || last_builder != null) {
+                Log.i(TAG, "Skipping VPN replacement recovery because protection is no longer active");
+                return;
+            }
+            if (VpnService.prepare(ServiceSinkhole.this) != null) {
+                Log.i(TAG, "Skipping VPN replacement recovery because VPN consent was revoked");
+                return;
+            }
+
+            Log.i(TAG, "Queueing VPN replacement recovery");
+            getLock(ServiceSinkhole.this).acquire(WAKELOCK_TIMEOUT_MS);
+            Intent intent = new Intent(ServiceSinkhole.this, ServiceSinkhole.class);
+            intent.putExtra(EXTRA_COMMAND, Command.reload);
+            intent.putExtra(EXTRA_REASON, "VPN replacement recovery");
+            intent.putExtra(EXTRA_REPLACEMENT_RETRY, true);
+            intent.putExtra(EXTRA_INTERACTIVE, false);
+            commandHandler.queue(intent);
+        }
+    };
+
+    // Cached preferences for shouldTrackApp() - refreshed in reload()
+    private volatile SharedPreferences cachedTrackerProtectPrefs;
+    private volatile SharedPreferences cachedApplyPrefs;
+    private volatile SharedPreferences cachedMinimalOnlyPrefs;
+    private volatile boolean cachedManageSystem;
+
+    private static final int NOTIFY_ENFORCING = 1;
+    private static final int NOTIFY_WAITING = 2;
+    private static final int NOTIFY_DISABLED = 3;
+    private static final int NOTIFY_AUTOSTART = 5;
+    private static final int NOTIFY_ERROR = 6;
+    private static final int NOTIFY_TRAFFIC = 7;
+    private static final int NOTIFY_UPDATE = 8;
+    public static final int NOTIFY_EXTERNAL = 9;
+    private static final int NOTIFY_DOH_ERROR = 11;
+    private static final int NOTIFY_WG_ERROR = 12;
+    private static final int NOTIFY_LOCAL_NETWORK = 13;
+    private static final int NOTIFY_PRIVATE_DNS = 14;
+    private static final int NOTIFY_PRIVATE_DNS_BYPASS = 15;
+    private static final int NOTIFY_WG_IDENTITY = 16;
+
+    static final int PRIVATE_DNS_WARNING_NONE = 0;
+    static final int PRIVATE_DNS_WARNING_HOSTNAME = 1;
+    static final int PRIVATE_DNS_WARNING_ALLOWED_DOT = 2;
+    private static final long PRIVATE_DNS_WARNING_WINDOW_MS = 60 * 60 * 1000L;
+    private int privateDnsWarningState = PRIVATE_DNS_WARNING_NONE;
+    private final Handler privateDnsWarningExpiryHandler = new Handler(Looper.getMainLooper());
+    private final Runnable privateDnsWarningExpiryRunnable = this::requestPrivateDnsWarningUpdate;
+    private final SharedPreferences.OnSharedPreferenceChangeListener privateDnsPreferenceListener =
+            (preferences, key) -> {
+                if ("block_dot".equals(key) || "log".equals(key))
+                    requestPrivateDnsWarningUpdate();
+            };
+
+    public static final String EXTRA_COMMAND = "Command";
+    private static final String EXTRA_REASON = "Reason";
+    public static final String EXTRA_NETWORK = "Network";
+    public static final String EXTRA_UID = "UID";
+    public static final String EXTRA_PACKAGE = "Package";
+    public static final String EXTRA_BLOCKED = "Blocked";
+    public static final String EXTRA_INTERACTIVE = "Interactive";
+    public static final String EXTRA_TEMPORARY = "Temporary";
+    private static final String EXTRA_USER_INITIATED = "UserInitiated";
+    private static final String PREF_STOPPED_CLEANLY = "vpn_stopped_cleanly";
+
+    private static final int MSG_STATS_START = 1;
+    private static final int MSG_STATS_STOP = 2;
+    private static final int MSG_STATS_UPDATE = 3;
+    private static final int MSG_PACKET = 4;
+    private static final int MSG_USAGE = 5;
+
+    private enum State {
+        none, waiting, enforcing, stats
+    }
+
+    public enum Command {
+        run, start, reload, stop, stats, set, householding, doh_error
+    }
+
+    private static volatile PowerManager.WakeLock wlInstance = null;
+
+    private ExecutorService executor = Executors.newCachedThreadPool();
+
+    // Shared resolver for the carrier ePDG lookup in getBuilder(). A fresh
+    // executor per build leaked one non-daemon worker thread per VPN rebuild.
+    private static final ExecutorService EPDG_RESOLVER = createEpdgResolver();
+
+    private static ExecutorService createEpdgResolver() {
+        // core=0/max=2 with a SynchronousQueue (not an unbounded queue, which
+        // would let corePoolSize=0 starve every submitted task of a worker
+        // thread): a hung getAllByName() lookup ties up only one worker, so a
+        // later rebuild's lookup still gets a second thread instead of
+        // queuing behind it and burning its own 1.5s timeout for nothing.
+        ThreadPoolExecutor resolver = new ThreadPoolExecutor(
+                0, 2, 30L, TimeUnit.SECONDS,
+                new SynchronousQueue<>(),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "epdg-resolver");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+        // Idle workers die instead of lingering between rebuilds
+        resolver.allowCoreThreadTimeOut(true);
+        return resolver;
+    }
+
+    private static final String ACTION_HOUSE_HOLDING = "eu.faircode.netguard.HOUSE_HOLDING";
+
+    private native long jni_init(int sdk);
+
+    private native void jni_start(long context, int loglevel, boolean tcpMssClamp);
+
+    private native void jni_run(long context, int tun, boolean fwd53, int rcode);
+
+    private native void jni_stop(long context);
+
+    private native void jni_clear(long context);
+
+    private native int jni_get_mtu();
+
+    private native int[] jni_get_stats(long context);
+
+    private static native void jni_pcap(String name, int record_size, int file_size);
+
+    private native void jni_socks5(String addr, int port, String username, String password);
+
+    private native void jni_sni(boolean enabled);
+
+    /** Allocate the WG egress socketpair; returns the read-end fd to hand to wgbridge,
+     *  or -1 on failure. The C side retains the write end and flips wg_enabled. */
+    private native int jni_wireguard_start();
+
+    /** Disable WG egress and close the socketpair write end. Idempotent. */
+    private native void jni_wireguard_stop();
+
+    /** Tell the C layer whether WG egress is wanted. While required but not
+     *  running (restart window, failed start) hijack-eligible traffic is
+     *  dropped instead of forwarded directly, so restarts never leak. */
+    private native void jni_wireguard_required(boolean required);
+
+    /**
+     * Pushes the set of UIDs whose routing differs from the global default down
+     * to the packet path, plus that default (applied to every UID not in the
+     * set — unknown UIDs and system traffic included) and whether direct apps'
+     * DNS is redirected to the system resolver rather than always taking the
+     * tunnel. Java writes this while the tunnel thread reads it, so the native
+     * side guards it with its own lock.
+     */
+    private native void jni_wireguard_route(int[] overrideUids, boolean defaultTunnel, boolean dnsDirect);
+
+    private native void jni_done(long context);
+
+    public static void setPcap(boolean enabled, Context context) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+
+        int record_size = 64;
+        try {
+            String r = prefs.getString("pcap_record_size", null);
+            if (TextUtils.isEmpty(r))
+                r = "64";
+            record_size = Integer.parseInt(r);
+        } catch (Throwable ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+
+        int file_size = 2 * 1024 * 1024;
+        try {
+            String f = prefs.getString("pcap_file_size", null);
+            if (TextUtils.isEmpty(f))
+                f = "2";
+            // jni_pcap takes a jint, so compute in long first: an in-int
+            // multiplication of a few thousand (MB) overflows to a negative
+            // file size, which native then truncates on every write.
+            long sizeBytes = Long.parseLong(f) * 1024 * 1024;
+            file_size = (int) Math.min(sizeBytes, Integer.MAX_VALUE);
+        } catch (Throwable ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+
+        File pcap = (enabled ? new File(context.getDir("data", MODE_PRIVATE), "netguard.pcap") : null);
+        jni_pcap(pcap == null ? null : pcap.getAbsolutePath(), record_size, file_size);
+    }
+
+    synchronized private static PowerManager.WakeLock getLock(Context context) {
+        if (wlInstance == null) {
+            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            wlInstance = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
+                    context.getString(R.string.app_name) + " wakelock");
+            wlInstance.setReferenceCounted(true);
+        }
+        return wlInstance;
+    }
+
+    synchronized private static void releaseLock(Context context) {
+        if (wlInstance != null) {
+            while (wlInstance.isHeld())
+                wlInstance.release();
+            wlInstance = null;
+        }
+    }
+
+    private final class CommandHandler extends Handler {
+        public int queue = 0;
+
+        public CommandHandler(Looper looper) {
+            super(looper);
+        }
+
+        private void reportQueueSize() {
+            Intent ruleset = new Intent(ActivityMain.ACTION_QUEUE_CHANGED);
+            ruleset.putExtra(ActivityMain.EXTRA_SIZE, queue);
+            LocalBroadcastManager.getInstance(ServiceSinkhole.this).sendBroadcast(ruleset);
+        }
+
+        public void queue(Intent intent) {
+            synchronized (this) {
+                queue++;
+                reportQueueSize();
+            }
+            Command cmd = (Command) intent.getSerializableExtra(EXTRA_COMMAND);
+            Message msg = commandHandler.obtainMessage();
+            msg.obj = intent;
+            msg.what = cmd.ordinal();
+            commandHandler.sendMessage(msg);
+        }
+
+        @Override
+        public void handleMessage(Message msg) {
+            try {
+                synchronized (ServiceSinkhole.this) {
+                    handleIntent((Intent) msg.obj);
+                }
+            } catch (Throwable ex) {
+                Intent intent = (Intent) msg.obj;
+                if (intent != null && intent.getBooleanExtra(EXTRA_WG_STARTUP_RETRY, false))
+                    cancelWireGuardStartupRecovery(true);
+                Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+            } finally {
+                synchronized (this) {
+                    queue--;
+                    reportQueueSize();
+                }
+                try {
+                    PowerManager.WakeLock wl = getLock(ServiceSinkhole.this);
+                    if (wl.isHeld())
+                        wl.release();
+                    else
+                        Log.w(TAG, "Wakelock under-locked");
+                    Log.i(TAG, "Messages=" + hasMessages(0) + " wakelock=" + wlInstance.isHeld());
+                } catch (Throwable ex) {
+                    Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                }
+            }
+        }
+
+        private void handleIntent(Intent intent) {
+            final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+
+            Command cmd = (Command) intent.getSerializableExtra(EXTRA_COMMAND);
+            String reason = intent.getStringExtra(EXTRA_REASON);
+            final boolean wireGuardStartupRetry =
+                    intent.getBooleanExtra(EXTRA_WG_STARTUP_RETRY, false);
+            Log.i(TAG, "Executing intent=" + intent + " command=" + cmd + " reason=" + reason +
+                    " vpn=" + (vpn != null) + " user=" + (Process.myUid() / 100000));
+
+            // Consume the dispatch marker before any preflight gate can return.
+            // Otherwise a background-user or temporary-stop return strands the
+            // retry in the dispatched state and blocks all later failures.
+            if (wireGuardStartupRetry) {
+                synchronized (wgStartupRecoveryLock) {
+                    if (!wgStartupRecoveryPolicy.begin()) {
+                        Log.i(TAG, "Ignoring stale WireGuard startup recovery");
+                        return;
+                    }
+                }
+            }
+
+            // Check if foreground
+            if (cmd != Command.stop)
+                if (!user_foreground) {
+                    if (cmd == Command.start && intent.getBooleanExtra(EXTRA_USER_INITIATED, false)) {
+                        // The user reached our UI in this profile, so it is in the foreground
+                        // regardless of whether a matching ACTION_USER_FOREGROUND ever arrived.
+                        user_foreground = true;
+                        Log.i(TAG, "User-initiated start, clearing background user state");
+                    } else {
+                        if (wireGuardStartupRetry)
+                            cancelWireGuardStartupRecovery(true);
+                        Log.i(TAG, "Command " + cmd + " ignored for background user");
+                        return;
+                    }
+                }
+
+            // Handle temporary stop
+            if (cmd == Command.stop)
+                temporarilyStopped = intent.getBooleanExtra(EXTRA_TEMPORARY, false);
+            else if (cmd == Command.start)
+                temporarilyStopped = false;
+            else if (cmd == Command.reload && temporarilyStopped) {
+                // Prevent network/interactive changes from restarting the VPN
+                if (wireGuardStartupRetry)
+                    cancelWireGuardStartupRecovery(true);
+                Log.i(TAG, "Command " + cmd + " ignored because of temporary stop");
+                return;
+            }
+
+            // Optionally listen for interactive state changes
+            if (prefs.getBoolean("screen_on", true)) {
+                if (!registeredInteractiveState) {
+                    Log.i(TAG, "Starting listening for interactive state changes");
+                    last_interactive = Util.isInteractive(ServiceSinkhole.this);
+                    IntentFilter ifInteractive = new IntentFilter();
+                    ifInteractive.addAction(Intent.ACTION_SCREEN_ON);
+                    ifInteractive.addAction(Intent.ACTION_SCREEN_OFF);
+                    ContextCompat.registerReceiver(ServiceSinkhole.this, interactiveStateReceiver, ifInteractive,
+                            ContextCompat.RECEIVER_NOT_EXPORTED);
+                    registeredInteractiveState = true;
+                }
+            } else {
+                if (registeredInteractiveState) {
+                    Log.i(TAG, "Stopping listening for interactive state changes");
+                    unregisterReceiver(interactiveStateReceiver);
+                    registeredInteractiveState = false;
+                    last_interactive = false;
+                }
+            }
+
+            // Optionally listen for call state changes
+            TelephonyManager tm = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+            if (prefs.getBoolean("disable_on_call", false)) {
+                if (tm != null && callStateListener == null && Util.hasPhoneStatePermission(ServiceSinkhole.this)) {
+                    Log.i(TAG, "Starting listening for call states");
+                    PhoneStateListener listener = new PhoneStateListener() {
+                        @Override
+                        public void onCallStateChanged(int state, String incomingNumber) {
+                            Log.i(TAG, "New call state=" + state);
+                            if (prefs.getBoolean("enabled", false))
+                                if (state == TelephonyManager.CALL_STATE_IDLE)
+                                    ServiceSinkhole.start("call state", ServiceSinkhole.this);
+                                else
+                                    ServiceSinkhole.stop("call state", ServiceSinkhole.this, true);
+                        }
+                    };
+                    tm.listen(listener, PhoneStateListener.LISTEN_CALL_STATE);
+                    callStateListener = listener;
+                }
+            } else {
+                if (tm != null && callStateListener != null) {
+                    Log.i(TAG, "Stopping listening for call states");
+                    tm.listen(callStateListener, PhoneStateListener.LISTEN_NONE);
+                    callStateListener = null;
+                }
+            }
+
+            try {
+                switch (cmd) {
+                    case run:
+                        break;
+
+                    case start:
+                        if (vpn == null)
+                            cancelNativeRecovery(true);
+                        if (vpn == null)
+                            cancelVpnReplacementRecovery(true);
+                        if (vpn == null)
+                            cancelWireGuardStartupRecovery(true);
+                        start();
+                        break;
+
+                    case reload:
+                        // The startup-retry dispatch marker was consumed before
+                        // preflight; ordinary reloads cancel stale retries.
+                        if (!wireGuardStartupRetry)
+                            cancelWireGuardStartupRecovery(false);
+                        if (!intent.getBooleanExtra(EXTRA_REPLACEMENT_RETRY, false))
+                            cancelVpnReplacementRecovery(false);
+                        reload(intent.getBooleanExtra(EXTRA_INTERACTIVE, false));
+                        break;
+
+                    case stop:
+                        cancelNativeRecovery(true);
+                        cancelVpnReplacementRecovery(true);
+                        cancelWireGuardStartupRecovery(true);
+                        stop(temporarilyStopped);
+                        break;
+
+                    case stats:
+                        statsHandler.sendEmptyMessage(MSG_STATS_STOP);
+                        statsHandler.sendEmptyMessage(MSG_STATS_START);
+                        break;
+
+                    case householding:
+                        householding(intent);
+                        break;
+
+                    case doh_error:
+                        showDohErrorNotification();
+                        break;
+
+                    default:
+                        Log.e(TAG, "Unknown command=" + cmd);
+                }
+
+                if (cmd == Command.start || cmd == Command.reload || cmd == Command.stop) {
+                    // Update main view
+                    Intent ruleset = new Intent(ActivityMain.ACTION_RULES_CHANGED);
+                    boolean refreshRules = "changed blocking_mode".equals(reason)
+                            || "blocklist changed".equals(reason)
+                            || "hosts file download".equals(reason);
+                    ruleset.putExtra(ActivityMain.EXTRA_REFRESH, refreshRules);
+                    ruleset.putExtra(ActivityMain.EXTRA_CONNECTED, cmd == Command.stop ? false : last_connected);
+                    ruleset.putExtra(ActivityMain.EXTRA_METERED, cmd == Command.stop ? false : last_metered);
+                    LocalBroadcastManager.getInstance(ServiceSinkhole.this).sendBroadcast(ruleset);
+
+                    // Update widgets
+                    WidgetMain.updateWidgets(ServiceSinkhole.this);
+                }
+
+                // Stop service if needed
+                if (!commandHandler.hasMessages(Command.start.ordinal()) &&
+                        !commandHandler.hasMessages(Command.reload.ordinal()) &&
+                        !prefs.getBoolean("enabled", false) &&
+                        !prefs.getBoolean("show_stats", false))
+                    stopForeground(true);
+            } catch (Throwable ex) {
+                if (wireGuardStartupRetry)
+                    cancelWireGuardStartupRecovery(true);
+                Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+
+                if (cmd == Command.start || cmd == Command.reload) {
+                    if (VpnService.prepare(ServiceSinkhole.this) == null) {
+                        Log.w(TAG, "VPN prepared connected=" + last_connected);
+                        if (ex instanceof StartFailedException
+                                && ((StartFailedException) ex).isReplacementFailure())
+                            scheduleVpnReplacementRecovery();
+                        if (last_connected && !(ex instanceof StartFailedException)) {
+                            // showAutoStartNotification();
+                            if (!Util.isPlayStoreInstall(ServiceSinkhole.this))
+                                showErrorNotification(ex.toString());
+                        }
+                        // Retried on connectivity change
+                    } else {
+                        cancelVpnReplacementRecovery(false);
+                        showErrorNotification(ex.toString());
+
+                        // Disable firewall
+                        if (!(ex instanceof StartFailedException)) {
+                            prefs.edit().putBoolean("enabled", false).apply();
+                            WidgetMain.updateWidgets(ServiceSinkhole.this);
+                        }
+                    }
+                } else
+                    showErrorNotification(ex.toString());
+            }
+        }
+
+        private void start() {
+            // Expired pauses must be resolved before the first rule snapshot is
+            // built; the service command handler already runs off the UI thread.
+            PausedApps.sweep(ServiceSinkhole.this);
+            if (vpn == null) {
+                if (state != State.none) {
+                    Log.d(TAG, "Stop foreground state=" + state.toString());
+                    stopForeground(true);
+                }
+                startForeground(NOTIFY_ENFORCING, getEnforcingNotification(-1, -1, -1));
+                state = State.enforcing;
+                Log.d(TAG, "Start foreground state=" + state.toString());
+
+                List<Rule> listRule = Rule.getRules(true, ServiceSinkhole.this);
+                List<Rule> listAllowed = getAllowedRules(listRule);
+
+                last_builder = getBuilder(listAllowed, listRule);
+                vpn = startVPN(last_builder);
+                if (vpn == null)
+                    throw new StartFailedException(getString((R.string.msg_start_failed)));
+
+                if (!startNative(vpn, listAllowed, listRule))
+                    return;
+
+                // Start DoH proxy if enabled and not superseded by WireGuard DNS.
+                updateDnsProxyState();
+
+                removeWarningNotifications();
+                updateEnforcingNotification(listAllowed.size(), listRule.size());
+            }
+        }
+
+        private void reload(boolean interactive) {
+            List<Rule> listRule = Rule.getRules(true, ServiceSinkhole.this);
+
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+
+            // Refresh cached preferences for shouldTrackApp()
+            cachedTrackerProtectPrefs = getSharedPreferences("tracker_protect", Context.MODE_PRIVATE);
+            cachedApplyPrefs = getSharedPreferences("apply", Context.MODE_PRIVATE);
+            cachedMinimalOnlyPrefs = getSharedPreferences("tracker_essential", Context.MODE_PRIVATE);
+            cachedManageSystem = prefs.getBoolean("manage_system", false);
+
+            if (state != State.enforcing) {
+                if (state != State.none) {
+                    Log.d(TAG, "Stop foreground state=" + state.toString());
+                    stopForeground(true);
+                }
+                startForeground(NOTIFY_ENFORCING, getEnforcingNotification(-1, -1, -1));
+                state = State.enforcing;
+                Log.d(TAG, "Start foreground state=" + state.toString());
+            }
+
+            List<Rule> listAllowed = getAllowedRules(listRule);
+            ServiceSinkhole.Builder builder = getBuilder(listAllowed, listRule);
+
+            if (vpn != null && builder.equals(last_builder)) {
+                    Log.i(TAG, "Native restart");
+                    stopNative(vpn);
+
+            } else {
+                    last_builder = builder;
+
+                    if (vpn == null)
+                        vpn = startVPN(builder);
+                    else {
+                        ParcelFileDescriptor previous = vpn;
+                        try {
+                            vpn = VpnReplacementSequencer.replace(
+                                    previous,
+                                    () -> startVPN(getBlockingBuilder(listRule)),
+                                    () -> startVPN(builder),
+                                    active -> vpn = active,
+                                    ServiceSinkhole.this::stopNative,
+                                    ServiceSinkhole.this::stopVPN);
+                            cancelVpnReplacementRecovery(true);
+                        } catch (RuntimeException ex) {
+                            // A blocking descriptor remains active after a
+                            // replacement failure. Force the next reload down
+                            // the full replacement path instead of starting
+                            // the packet engine on that placeholder interface.
+                            last_builder = null;
+                            Log.w(TAG, ex.getMessage());
+                            if (ex instanceof VpnReplacementSequencer.EstablishFailedException)
+                                throw new StartFailedException(getString(R.string.msg_start_failed),
+                                        ((VpnReplacementSequencer.EstablishFailedException) ex)
+                                                .isReplacementFailure());
+                            throw ex;
+                        }
+                    }
+            }
+
+            if (vpn == null)
+                throw new StartFailedException(getString((R.string.msg_start_failed)));
+
+            if (!startNative(vpn, listAllowed, listRule))
+                return;
+
+            // Update DoH proxy state based on current settings.
+            updateDnsProxyState();
+
+            removeWarningNotifications();
+            updateEnforcingNotification(listAllowed.size(), listRule.size());
+        }
+
+        private void stop(boolean temporary) {
+            cancelWireGuardStartupRecovery(true);
+            if (vpn != null) {
+                stopNative(vpn);
+                stopVPN(vpn);
+                vpn = null;
+                vpnEstablished = false;
+                // A teardown the service performs itself, so it is not one
+                // VpnRestartWorker should undo, whether it is a switch-off or
+                // the pause for a phone call.
+                markStoppedCleanly(true);
+                // Final teardown — service is actually stopping (user toggled
+                // VPN off, OS is killing us, etc.) so WG should not survive.
+                net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.stop(
+                        () -> { jni_wireguard_stop(); return kotlin.Unit.INSTANCE; });
+                jni_wireguard_required(false);
+                // WgEgress clears its error as it tears the tunnel down, so the
+                // state listener already retracts this one; the call remains for
+                // the case it cannot see, a start that failed without ever
+                // producing a tunnel, where stop() finds nothing to notify about.
+                clearWireGuardErrorNotification();
+                // The other three are config warnings nothing else retracts, and
+                // all describe a tunnel that is no longer running — but leave
+                // them on a temporary stop (a call, say): the VPN is coming
+                // straight back, and re-posting a cancelled notification alerts
+                // again, so the user would be buzzed on every call.
+                if (!temporary) {
+                    clearLocalNetworkNotification();
+                    clearPrivateDnsNotification();
+                }
+                unprepare();
+
+                // Stop DoH proxy
+                net.kollnig.missioncontrol.dns.DnsProxyServer.getInstance(ServiceSinkhole.this).stop();
+            }
+            if (!temporary) {
+                resetPrivateDnsBypassWarning();
+            }
+            if (state == State.enforcing && !temporary) {
+                Log.d(TAG, "Stop foreground state=" + state.toString());
+                last_allowed = -1;
+                last_blocked = -1;
+                last_hosts = -1;
+
+                stopForeground(true);
+
+                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+                if (prefs.getBoolean("show_stats", false)) {
+                    startForeground(NOTIFY_WAITING, getWaitingNotification());
+                    state = State.waiting;
+                    Log.d(TAG, "Start foreground state=" + state.toString());
+                } else {
+                    state = State.none;
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        stopForeground(true);
+                    } else {
+                        stopSelf();
+                    }
+                }
+            }
+        }
+
+        // Called every 12 hours
+        private void householding(Intent intent) {
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+
+            // Keep log records for three days, only wipe if logging on
+            if (prefs.getBoolean("log", false))
+                DatabaseHelper.getInstance(ServiceSinkhole.this)
+                        .cleanupLog(new Date().getTime() - 3 * 24 * 3600 * 1000L);
+
+            // Clear expired DNS records
+            DatabaseHelper.getInstance(ServiceSinkhole.this).cleanupDns();
+
+            // Refresh mappings regularly
+            trackerCache.clear();
+            uidToApp.clear();
+            uidToPackage.clear();
+
+            // Check for update
+            if (!Util.isPlayStoreInstall(ServiceSinkhole.this)
+                    && !Util.isFDroidInstall()
+                    && prefs.getBoolean("update_check", true))
+                checkUpdate();
+        }
+
+        private void checkUpdate() {
+            StringBuilder json = new StringBuilder();
+            HttpsURLConnection urlConnection = null;
+            try {
+                URL url = new URL(BuildConfig.GITHUB_LATEST_API);
+                urlConnection = (HttpsURLConnection) url.openConnection();
+                urlConnection.setConnectTimeout(UPDATE_CHECK_TIMEOUT_MS);
+                urlConnection.setReadTimeout(UPDATE_CHECK_TIMEOUT_MS);
+                urlConnection.setRequestProperty("Accept-Encoding", "gzip");
+                BufferedReader br;
+                if ("gzip".equals(urlConnection.getContentEncoding()))
+                    br = new BufferedReader(new InputStreamReader(new GZIPInputStream(urlConnection.getInputStream())));
+                else
+                    br = new BufferedReader(new InputStreamReader(urlConnection.getInputStream()));
+
+                String line;
+                while ((line = br.readLine()) != null)
+                    json.append(line);
+                br.close();
+
+            } catch (Throwable ex) {
+                Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+            } finally {
+                if (urlConnection != null)
+                    urlConnection.disconnect();
+            }
+
+            try {
+                JSONArray jarray = new JSONArray(json.toString());
+                if (jarray.length() < 1)
+                    return;
+                JSONObject jroot = jarray.getJSONObject(0);
+                // JSONObject jroot = new JSONObject(json.toString());
+                if (jroot.has("tag_name") && jroot.has("html_url") && jroot.has("assets")) {
+                    // Always link to the release page rather than a specific
+                    // asset: the user picks the right download there, and
+                    // the notification doesn't depend on asset ordering.
+                    String url = jroot.getString("html_url");
+                    JSONArray jassets = jroot.getJSONArray("assets");
+                    if (jassets.length() > 0) {
+                        long available = jroot.getLong("tag_name");
+                        String name = (jroot.has("name") && !jroot.isNull("name") && jroot.getString("name").length() > 0)
+                                ? jroot.getString("name")
+                                : getString(R.string.title_version, available);
+                        Log.i(TAG, "Tag " + available + " name " + name + " url " + url);
+
+                        long current = Util.getSelfVersionCode(ServiceSinkhole.this);
+                        if (current < available) {
+                            Log.i(TAG, "Update available from " + current + " to " + available);
+                            showUpdateNotification(name, url);
+                        } else
+                            Log.i(TAG, "Up-to-date current version " + current);
+                    }
+                }
+            } catch (JSONException ex) {
+                Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+            }
+        }
+
+        private class StartFailedException extends IllegalStateException {
+            private final boolean replacementFailure;
+
+            public StartFailedException(String msg) {
+                this(msg, false);
+            }
+
+            public StartFailedException(String msg, boolean replacementFailure) {
+                super(msg);
+                this.replacementFailure = replacementFailure;
+            }
+
+            public boolean isReplacementFailure() {
+                return replacementFailure;
+            }
+        }
+    }
+
+    private final class LogHandler extends Handler {
+        public int queue = 0;
+
+        private static final int MAX_QUEUE = 1000;
+
+        public LogHandler(Looper looper) {
+            super(looper);
+        }
+
+        public void queue(Packet packet) {
+            Message msg = obtainMessage();
+            msg.obj = packet;
+            msg.what = MSG_PACKET;
+            msg.arg1 = (last_connected ? (last_metered ? 2 : 1) : 0);
+            msg.arg2 = (last_interactive ? 1 : 0);
+
+            synchronized (this) {
+                if (queue > MAX_QUEUE) {
+                    Log.w(TAG, "Log queue full");
+                    return;
+                }
+
+                sendMessage(msg);
+
+                queue++;
+            }
+        }
+
+        public void account(Usage usage) {
+            Message msg = obtainMessage();
+            msg.obj = usage;
+            msg.what = MSG_USAGE;
+
+            synchronized (this) {
+                if (queue > MAX_QUEUE) {
+                    Log.w(TAG, "Log queue full");
+                    return;
+                }
+
+                sendMessage(msg);
+
+                queue++;
+            }
+        }
+
+        @Override
+        public void handleMessage(Message msg) {
+            try {
+                switch (msg.what) {
+                    case MSG_PACKET:
+                        log((Packet) msg.obj, msg.arg1, msg.arg2 > 0);
+                        break;
+
+                    case MSG_USAGE:
+                        usage((Usage) msg.obj);
+                        break;
+
+                    default:
+                        Log.e(TAG, "Unknown log message=" + msg.what);
+                }
+
+            } catch (Throwable ex) {
+                Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+            } finally {
+                // Decrement even when log()/usage() threw, or failed messages
+                // would permanently consume queue slots until logging died
+                synchronized (this) {
+                    queue--;
+                }
+            }
+        }
+
+        private void log(Packet packet, int connection, boolean interactive) {
+            // Get settings
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+            boolean log = prefs.getBoolean("log", false);
+            boolean log_app = prefs.getBoolean("log_app", true);
+
+            DatabaseHelper dh = DatabaseHelper.getInstance(ServiceSinkhole.this);
+
+            String dname = null;
+            String originalDname = null;
+
+            int uncertain = DatabaseHelper.ACCESS_UNCERTAIN_NONE;
+            boolean isTracker = false;
+            try (Cursor lookup = dh.getQAName(packet.uid, packet.daddr)) {
+                DnsEvidence evidence = DnsEvidence.read(lookup);
+                uncertain = evidence.questions.size() > 1
+                        ? DatabaseHelper.ACCESS_UNCERTAIN_SHARED_IP
+                        : DatabaseHelper.ACCESS_UNCERTAIN_NONE;
+
+                // Loop until we find tracker or reach last entry
+                if (lookup != null) {
+                    Pair<Tracker, String> foundTracker = new Pair<>(NO_TRACKER, null);
+                    boolean sawNonTrackerEvidence = false;
+                    boolean sawDifferentTrackerEvidence = false;
+
+                    while (lookup.moveToNext()) {
+                        dname = lookup.getString(lookup.getColumnIndexOrThrow("qname"));
+                        if (dname != null) {
+                            originalDname = dname;
+
+                            String aname = lookup.getString(lookup.getColumnIndexOrThrow("aname"));
+                            Pair<Tracker, String> p = getDecloakedTracker(dname, aname);
+
+                            if (foundTracker.first == NO_TRACKER
+                                    && p.first != null) { // store found tracker
+                                isTracker = true;
+                                foundTracker = p;
+                            }
+
+                            if (foundTracker.first != NO_TRACKER
+                                    && p.first != null
+                                    && !Objects.equals(foundTracker.first.name, p.first.name)) {
+                                sawDifferentTrackerEvidence = true;
+                            } else if (p.first == null
+                                    && !evidence.trackerQuestions.contains(dname)) {
+                                sawNonTrackerEvidence = true;
+                            }
+                        }
+                    }
+
+                    if (uncertain == DatabaseHelper.ACCESS_UNCERTAIN_SHARED_IP && foundTracker.first != NO_TRACKER) {
+                        if (sawNonTrackerEvidence) {
+                            uncertain = DatabaseHelper.ACCESS_UNCERTAIN_MIXED_TRACKER_AND_NON_TRACKER;
+                        } else if (sawDifferentTrackerEvidence) {
+                            uncertain = DatabaseHelper.ACCESS_UNCERTAIN_MULTIPLE_TRACKERS;
+                        }
+                    }
+
+                    if (foundTracker.first != NO_TRACKER)
+                        dname = foundTracker.second;
+                }
+            }
+
+            // SNI extraction: disabled by default because connecting to tracker IPs
+            // to read TLS ClientHello leaks the user's IP address to the tracker server.
+            // Can be enabled via Settings > Advanced > SNI extraction for research.
+            // The native side (ip.c) is controlled via jni_sni().
+            if (prefs.getBoolean("sni_enabled", false)
+                    && packet.data != null
+                    && !packet.data.isEmpty()) {
+                uncertain = DatabaseHelper.ACCESS_UNCERTAIN_NONE;
+                if (!packet.data.equals(originalDname)) {
+                    Log.d(TAG, "Using SNI " + packet.data + " instead of originalDname " + originalDname);
+                    dname = packet.data;
+                    isTracker = getDecloakedTracker(dname, dh).first != null;
+                }
+            }
+
+            if (uncertain == DatabaseHelper.ACCESS_UNCERTAIN_SHARED_IP) // multiple dnames correspond to same IP address
+                Log.d(TAG, "Found uncertain entry: " + dname);
+
+            // Traffic log
+            if (log) {
+                dh.insertLog(packet, dname, connection, interactive);
+                // The encrypted-DNS warning is evidence-driven. Re-evaluate as
+                // soon as the first allowed DoT flow is recorded rather than
+                // waiting for a later VPN restart or network change.
+                if (DatabaseHelper.isAllowedDotEvidence(packet) &&
+                        !prefs.getBoolean("block_dot", true))
+                    updatePrivateDnsBypassWarning();
+            }
+
+            // Application log
+            if (log_app && isTracker && shouldTrackApp(packet.uid) && packet.uid >= 0 &&
+                    !(packet.uid == 0 && (packet.protocol == 6 || packet.protocol == 17) && packet.dport == 53)) {
+                if (!(packet.protocol == 6 /* TCP */ || packet.protocol == 17 /* UDP */))
+                    packet.dport = 0;
+
+                dh.updateAccess(packet, dname, -1, uncertain);
+            }
+        }
+
+        private Pair<Tracker, String> getDecloakedTracker(String qname, DatabaseHelper dh) {
+            Cursor lookup = dh.getAName(qname, false);
+            String aname = null;
+            if (lookup != null) {
+                if (lookup.moveToNext())
+                    aname = lookup.getString(lookup.getColumnIndexOrThrow("aname"));
+                lookup.close();
+            }
+            return getDecloakedTracker(qname, aname);
+        }
+
+        private Pair<Tracker, String> getDecloakedTracker(String qname, String aname) {
+            String foundDname = null;
+            Tracker t = TrackerList.findTracker(qname);
+
+            if (t != null) {
+                foundDname = qname;
+            } else { // DNS uncloaking
+                if (aname != null) {
+                    t = TrackerList.findTracker(aname);
+                    if (t != null)
+                        foundDname = aname;
+                }
+            }
+
+            return new Pair<>(t, foundDname);
+        }
+
+        private void usage(Usage usage) {
+            if (usage.Uid >= 0 && !(usage.Uid == 0 && usage.Protocol == 17 && usage.DPort == 53)) {
+                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+                boolean log_app = prefs.getBoolean("log_app", true);
+                boolean track_usage = prefs.getBoolean("track_usage", false);
+                if (log_app && track_usage) {
+                    DatabaseHelper dh = DatabaseHelper.getInstance(ServiceSinkhole.this);
+                    String dname = dh.getQName(usage.Uid, usage.DAddr);
+                    Log.i(TAG, "Usage account " + usage + " dname=" + dname);
+                    dh.updateUsage(usage, dname);
+                }
+            }
+        }
+    }
+
+    private final class StatsHandler extends Handler {
+        private boolean stats = false;
+        private long when;
+
+        private long t = -1;
+        private long tx = -1;
+        private long rx = -1;
+
+        private List<Long> gt = new ArrayList<>();
+        private List<Float> gtx = new ArrayList<>();
+        private List<Float> grx = new ArrayList<>();
+
+        private HashMap<Integer, Long> mapUidBytes = new HashMap<>();
+
+        public StatsHandler(Looper looper) {
+            super(looper);
+        }
+
+        @Override
+        public void handleMessage(Message msg) {
+            try {
+                switch (msg.what) {
+                    case MSG_STATS_START:
+                        startStats();
+                        break;
+
+                    case MSG_STATS_STOP:
+                        stopStats();
+                        break;
+
+                    case MSG_STATS_UPDATE:
+                        updateStats();
+                        break;
+
+                    default:
+                        Log.e(TAG, "Unknown stats message=" + msg.what);
+                }
+            } catch (Throwable ex) {
+                Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+            }
+        }
+
+        private void startStats() {
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+            boolean enabled = (!stats && prefs.getBoolean("show_stats", false));
+            Log.i(TAG, "Stats start enabled=" + enabled);
+            if (enabled) {
+                when = new Date().getTime();
+                t = -1;
+                tx = -1;
+                rx = -1;
+                gt.clear();
+                gtx.clear();
+                grx.clear();
+                mapUidBytes.clear();
+                stats = true;
+                updateStats();
+            }
+        }
+
+        private void stopStats() {
+            Log.i(TAG, "Stats stop");
+            stats = false;
+            this.removeMessages(MSG_STATS_UPDATE);
+            if (state == State.stats) {
+                Log.d(TAG, "Stop foreground state=" + state.toString());
+                stopForeground(true);
+                state = State.none;
+            } else
+                NotificationManagerCompat.from(ServiceSinkhole.this).cancel(NOTIFY_TRAFFIC);
+        }
+
+        private void updateStats() {
+            // Stop the stats loop if stats were stopped (e.g. screen turned off)
+            if (!stats) {
+                return;
+            }
+
+            // Skip stats updates when screen is off to save battery
+            if (!last_interactive) {
+                return;
+            }
+
+            RemoteViews remoteViews = new RemoteViews(getPackageName(), R.layout.traffic);
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+            long frequency = Long.parseLong(prefs.getString("stats_frequency", "2000"));
+            long samples = Long.parseLong(prefs.getString("stats_samples", "90"));
+            boolean show_top = prefs.getBoolean("show_top", false);
+            int loglevel = Integer.parseInt(prefs.getString("loglevel", Integer.toString(Log.WARN)));
+
+            // Schedule next update
+            this.sendEmptyMessageDelayed(MSG_STATS_UPDATE, frequency);
+
+            long ct = SystemClock.elapsedRealtime();
+
+            // Cleanup
+            while (gt.size() > 0 && ct - gt.get(0) > samples * 1000) {
+                gt.remove(0);
+                gtx.remove(0);
+                grx.remove(0);
+            }
+
+            // Calculate network speed
+            float txsec = 0;
+            float rxsec = 0;
+            long ttx = TrafficStats.getTotalTxBytes();
+            long trx = TrafficStats.getTotalRxBytes();
+            ttx -= TrafficStats.getUidTxBytes(Process.myUid());
+            trx -= TrafficStats.getUidRxBytes(Process.myUid());
+            if (ttx < 0)
+                ttx = 0;
+            if (trx < 0)
+                trx = 0;
+            if (t > 0 && tx > 0 && rx > 0) {
+                float dt = (ct - t) / 1000f;
+                txsec = (ttx - tx) / dt;
+                rxsec = (trx - rx) / dt;
+                gt.add(ct);
+                gtx.add(txsec);
+                grx.add(rxsec);
+            }
+
+            // Calculate application speeds
+            if (show_top) {
+                if (mapUidBytes.size() == 0) {
+                    for (ApplicationInfo ainfo : getPackageManager().getInstalledApplications(0))
+                        if (ainfo.uid != Process.myUid())
+                            mapUidBytes.put(ainfo.uid,
+                                    TrafficStats.getUidTxBytes(ainfo.uid) + TrafficStats.getUidRxBytes(ainfo.uid));
+
+                } else if (t > 0) {
+                    TreeMap<Float, Integer> mapSpeedUid = new TreeMap<>(new Comparator<Float>() {
+                        @Override
+                        public int compare(Float value, Float other) {
+                            return -value.compareTo(other);
+                        }
+                    });
+                    float dt = (ct - t) / 1000f;
+                    for (int uid : mapUidBytes.keySet()) {
+                        long bytes = TrafficStats.getUidTxBytes(uid) + TrafficStats.getUidRxBytes(uid);
+                        float speed = (bytes - mapUidBytes.get(uid)) / dt;
+                        if (speed > 0) {
+                            mapSpeedUid.put(speed, uid);
+                            mapUidBytes.put(uid, bytes);
+                        }
+                    }
+
+                    StringBuilder sb = new StringBuilder();
+                    int i = 0;
+                    for (float speed : mapSpeedUid.keySet()) {
+                        if (i++ >= 3)
+                            break;
+                        if (speed < 1000 * 1000)
+                            sb.append(getString(R.string.msg_kbsec, speed / 1000));
+                        else
+                            sb.append(getString(R.string.msg_mbsec, speed / 1000 / 1000));
+                        sb.append(' ');
+                        List<String> apps = Util.getApplicationNames(mapSpeedUid.get(speed), ServiceSinkhole.this);
+                        sb.append(apps.size() > 0 ? apps.get(0) : "?");
+                        sb.append("\r\n");
+                    }
+                    if (sb.length() > 0)
+                        sb.setLength(sb.length() - 2);
+                    remoteViews.setTextViewText(R.id.tvTop, sb.toString());
+                }
+            }
+
+            t = ct;
+            tx = ttx;
+            rx = trx;
+
+            // Create bitmap
+            int height = Util.dips2pixels(96, ServiceSinkhole.this);
+            int width = Util.dips2pixels(96 * 5, ServiceSinkhole.this);
+            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+
+            // Create canvas
+            Canvas canvas = new Canvas(bitmap);
+            canvas.drawColor(Color.TRANSPARENT);
+
+            // Determine max
+            float max = 0;
+            long xmax = 0;
+            float ymax = 0;
+            for (int i = 0; i < gt.size(); i++) {
+                long t = gt.get(i);
+                float tx = gtx.get(i);
+                float rx = grx.get(i);
+                if (t > xmax)
+                    xmax = t;
+                if (tx > max)
+                    max = tx;
+                if (rx > max)
+                    max = rx;
+                if (tx > ymax)
+                    ymax = tx;
+                if (rx > ymax)
+                    ymax = rx;
+            }
+
+            // Build paths
+            Path ptx = new Path();
+            Path prx = new Path();
+            for (int i = 0; i < gtx.size(); i++) {
+                float x = width - width * (xmax - gt.get(i)) / 1000f / samples;
+                float ytx = height - height * gtx.get(i) / ymax;
+                float yrx = height - height * grx.get(i) / ymax;
+                if (i == 0) {
+                    ptx.moveTo(x, ytx);
+                    prx.moveTo(x, yrx);
+                } else {
+                    ptx.lineTo(x, ytx);
+                    prx.lineTo(x, yrx);
+                }
+            }
+
+            // Build paint
+            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            paint.setStyle(Paint.Style.STROKE);
+
+            // Draw scale line
+            paint.setStrokeWidth(Util.dips2pixels(1, ServiceSinkhole.this));
+            paint.setColor(ContextCompat.getColor(ServiceSinkhole.this, R.color.colorGrayed));
+            float y = height / 2;
+            canvas.drawLine(0, y, width, y, paint);
+
+            // Draw paths
+            paint.setStrokeWidth(Util.dips2pixels(2, ServiceSinkhole.this));
+            paint.setColor(ContextCompat.getColor(ServiceSinkhole.this, R.color.colorSend));
+            canvas.drawPath(ptx, paint);
+            paint.setColor(ContextCompat.getColor(ServiceSinkhole.this, R.color.colorReceive));
+            canvas.drawPath(prx, paint);
+
+            // Update remote view
+            remoteViews.setImageViewBitmap(R.id.ivTraffic, bitmap);
+            if (txsec < 1000 * 1000)
+                remoteViews.setTextViewText(R.id.tvTx, getString(R.string.msg_kbsec, txsec / 1000));
+            else
+                remoteViews.setTextViewText(R.id.tvTx, getString(R.string.msg_mbsec, txsec / 1000 / 1000));
+
+            if (rxsec < 1000 * 1000)
+                remoteViews.setTextViewText(R.id.tvRx, getString(R.string.msg_kbsec, rxsec / 1000));
+            else
+                remoteViews.setTextViewText(R.id.tvRx, getString(R.string.msg_mbsec, rxsec / 1000 / 1000));
+
+            if (max < 1000 * 1000)
+                remoteViews.setTextViewText(R.id.tvMax, getString(R.string.msg_kbsec, max / 2 / 1000));
+            else
+                remoteViews.setTextViewText(R.id.tvMax, getString(R.string.msg_mbsec, max / 2 / 1000 / 1000));
+
+            // Show session/file count
+            if (loglevel <= Log.WARN) {
+                // jni_lock: onDestroy can free the context while this tick is
+                // in flight; a stale pointer here would crash natively
+                int[] count = null;
+                synchronized (jni_lock) {
+                    if (jni_context != 0)
+                        count = jni_get_stats(jni_context);
+                }
+                if (count != null) {
+                    remoteViews.setTextViewText(R.id.tvSessions, count[0] + "/" + count[1] + "/" + count[2]);
+                    remoteViews.setTextViewText(R.id.tvFiles, count[3] + "/" + count[4]);
+                }
+            } else {
+                remoteViews.setTextViewText(R.id.tvSessions, "");
+                remoteViews.setTextViewText(R.id.tvFiles, "");
+            }
+
+            // Show notification
+            Intent main = new Intent(ServiceSinkhole.this, ActivityMain.class);
+            PendingIntent pi = PendingIntentCompat.getActivity(ServiceSinkhole.this, 0, main,
+                    PendingIntent.FLAG_UPDATE_CURRENT);
+
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(ServiceSinkhole.this, "notify");
+            builder.setWhen(when)
+                    .setSmallIcon(R.drawable.ic_equalizer_white_24dp)
+                    .setContent(remoteViews)
+                    .setContentIntent(pi)
+                    .setColor(getResources().getColor(R.color.colorTrackerControl))
+                    .setOngoing(true)
+                    .setAutoCancel(false);
+
+            builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+                    .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+
+            if (state == State.none || state == State.waiting) {
+                if (state != State.none) {
+                    Log.d(TAG, "Stop foreground state=" + state.toString());
+                    stopForeground(true);
+                }
+                startForeground(NOTIFY_TRAFFIC, builder.build());
+                state = State.stats;
+                Log.d(TAG, "Start foreground state=" + state.toString());
+            } else {
+                Util.notify(ServiceSinkhole.this, NOTIFY_TRAFFIC, builder.build());
+            }
+        }
+    }
+
+    public static List<InetAddress> getDns(Context context) {
+        List<InetAddress> listDns = new ArrayList<>();
+        List<String> sysDns = Util.getDefaultDNS(context);
+
+        // Get custom DNS servers
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        boolean ip6 = prefs.getBoolean("ip6", true);
+        String vpnDns1 = prefs.getString("dns", null);
+        String vpnDns2 = prefs.getString("dns2", null);
+        Log.i(TAG, "DNS system=" + TextUtils.join(",", sysDns) + " config=" + vpnDns1 + "," + vpnDns2);
+
+        // First pass: IPv4 resolvers only. This reproduces the historical
+        // behaviour and is preserved exactly for IPv4 and dual-stack networks —
+        // wherever a working IPv4 resolver exists, the tun keeps advertising only
+        // IPv4 DNS, so nothing changes for the working majority.
+        collectDns(listDns, vpnDns1, vpnDns2, sysDns, false);
+
+        // Second pass: on IPv6-only networks (increasingly common on modern
+        // cellular / Android 13+ IPv6-only mobile data) the carrier hands out only
+        // IPv6 resolvers, so the IPv4-only pass above finds nothing. Previously we
+        // then fell through to hardcoded IPv4 public DNS (getDefaultDns), which is
+        // unreachable without a working CLAT/NAT64 path — so all resolution failed
+        // on mobile data. Accept the carrier's IPv6 resolvers instead. Gated on the
+        // "ip6" preference because the builder only routes/advertises IPv6 when it
+        // is enabled (see getConfig: the "ip6 || Inet4Address" DNS filter and the
+        // 2000::/3 route). The native tunnel already intercepts and blocks DNS over
+        // IPv6 (udp.c/dns.c are IP-version-agnostic). Issue #339 (part of #449).
+        if (listDns.isEmpty() && ip6) {
+            Log.i(TAG, "No IPv4 resolver available; accepting IPv6 resolvers (IPv6-only network)");
+            collectDns(listDns, vpnDns1, vpnDns2, sysDns, true);
+        }
+
+        // Fallback DNS servers if none found
+        if (listDns.isEmpty())
+            listDns.addAll(getDefaultDns(ip6));
+
+        Log.i(TAG, "Get DNS=" + TextUtils.join(",", listDns));
+
+        return listDns;
+    }
+
+    // Collect usable resolvers — custom (dns/dns2) first, then the system
+    // resolvers — into listDns, mirroring the historical selection order and the
+    // "stop once two custom entries are set" short-circuit. allowIp6=false keeps
+    // the original IPv4-only filtering; allowIp6=true additionally accepts IPv6
+    // resolvers (used as an IPv6-only-network fallback, see getDns).
+    private static void collectDns(List<InetAddress> listDns, String vpnDns1,
+                                   String vpnDns2, List<String> sysDns, boolean allowIp6) {
+        if (vpnDns1 != null)
+            try {
+                InetAddress dns = InetAddress.getByName(vpnDns1);
+                if (isUsableDns(dns, allowIp6) && !listDns.contains(dns))
+                    listDns.add(dns);
+            } catch (Throwable ignored) {
+            }
+
+        if (vpnDns2 != null)
+            try {
+                InetAddress dns = InetAddress.getByName(vpnDns2);
+                if (isUsableDns(dns, allowIp6) && !listDns.contains(dns))
+                    listDns.add(dns);
+            } catch (Throwable ex) {
+                Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+            }
+
+        if (listDns.size() == 2)
+            return;
+
+        for (String def_dns : sysDns)
+            try {
+                InetAddress ddns = InetAddress.getByName(def_dns);
+                if (isUsableDns(ddns, allowIp6) && !listDns.contains(ddns))
+                    listDns.add(ddns);
+            } catch (Throwable ex) {
+                Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+            }
+    }
+
+    // A resolver is usable if it is a real remote address (not loopback / any-local)
+    // and of a family the tun will actually carry: IPv4 always, IPv6 only when
+    // allowed (i.e. IPv6 routing is enabled and no IPv4 resolver was available).
+    private static boolean isUsableDns(InetAddress dns, boolean allowIp6) {
+        // A link-local resolver is scoped to the underlying physical interface.
+        // That scope cannot be preserved when the address is advertised on the
+        // VPN, so it would be unreachable from the tun interface.
+        if (dns.isLoopbackAddress() || dns.isAnyLocalAddress() || dns.isLinkLocalAddress())
+            return false;
+        return (dns instanceof Inet4Address) || (allowIp6 && dns instanceof Inet6Address);
+    }
+
+    private static List<InetAddress> getWireGuardDns(net.kollnig.missioncontrol.wg.WgConfig config) {
+        List<InetAddress> listDns = new ArrayList<>();
+
+        for (String entry : config.getDns()) {
+            String dns = entry.trim();
+            if (dns.isEmpty())
+                continue;
+
+            if (!Util.isNumericAddress(dns)) {
+                Log.i(TAG, "Skipping non-numeric WG DNS/search entry=" + dns);
+                continue;
+            }
+
+            try {
+                InetAddress address = InetAddress.getByName(dns);
+                if (!(address.isLoopbackAddress() || address.isAnyLocalAddress()))
+                    listDns.add(address);
+            } catch (Throwable ex) {
+                Log.w(TAG, "Skipping invalid WG DNS=" + dns + ": " + ex.getMessage());
+            }
+        }
+
+        return listDns;
+    }
+
+    /**
+     * Whether the configured WireGuard egress will own DNS routing.
+     *
+     * The tunnel supplies a protected public fallback when the config has no
+     * usable DNS entry, so Secure DNS must be paused for that case too. The
+     * parser check keeps a malformed or incomplete preference from suppressing
+     * DoH when no tunnel can actually be started.
+     */
+    static boolean hasActiveWireGuard(SharedPreferences prefs) {
+        if (!prefs.getBoolean("wg_enabled", false))
+            return false;
+
+        String wgConfigText = prefs.getString("wg_config", "");
+        if (TextUtils.isEmpty(wgConfigText))
+            return false;
+
+        try {
+            net.kollnig.missioncontrol.wg.WgConfigParser.INSTANCE.parse(wgConfigText);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private void updateDnsProxyState() {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        net.kollnig.missioncontrol.dns.DnsProxyServer proxy =
+                net.kollnig.missioncontrol.dns.DnsProxyServer.getInstance(this);
+
+        if (prefs.getBoolean("doh_enabled", false) && hasActiveWireGuard(prefs)) {
+            Log.i(TAG, "Secure DNS proxy disabled while WireGuard egress is active");
+            proxy.stop();
+        } else {
+            proxy.checkAndUpdateState();
+        }
+    }
+
+    private static List<InetAddress> getDefaultDns(boolean ip6) {
+        List<InetAddress> listDns = new ArrayList<>();
+        try {
+            listDns.add(InetAddress.getByName(net.kollnig.missioncontrol.BuildConfig.DEFAULT_DNS_IPV4));
+            listDns.add(InetAddress.getByName(net.kollnig.missioncontrol.BuildConfig.DEFAULT_DNS_IPV4_2));
+            if (ip6) {
+                listDns.add(InetAddress.getByName(net.kollnig.missioncontrol.BuildConfig.DEFAULT_DNS_IPV6));
+                listDns.add(InetAddress.getByName(net.kollnig.missioncontrol.BuildConfig.DEFAULT_DNS_IPV6_2));
+            }
+        } catch (Throwable ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+        return listDns;
+    }
+
+    private ParcelFileDescriptor startVPN(Builder builder) throws SecurityException {
+        try {
+            ParcelFileDescriptor pfd = builder.establish();
+            if (pfd == null || !pfd.getFileDescriptor().valid()) {
+                Log.w(TAG, "VPN interface was not ready after establish");
+                if (pfd != null)
+                    stopVPN(pfd);
+                return null;
+            }
+            updateUnderlyingNetworks();
+            vpnEstablished = true;
+            markStoppedCleanly(false);
+            return pfd;
+        } catch (SecurityException ex) {
+            throw ex;
+        } catch (Throwable ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+            return null;
+        }
+    }
+
+    static int getPrivateDnsWarningState(Context context) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        boolean blockDot = prefs.getBoolean("block_dot", true);
+        if (blockDot)
+            return PRIVATE_DNS_WARNING_NONE;
+
+        // Case A takes precedence and avoids querying the log. Case B is only
+        // meaningful when the full traffic log is enabled: insertLog runs only
+        // on that path. log_app defaults to true but records recognized tracker
+        // contacts in access, not all flows, so it cannot support this warning.
+        if (Util.isPrivateDnsDetectionDefeated(context))
+            return PRIVATE_DNS_WARNING_HOSTNAME;
+        if (!prefs.getBoolean("log", false))
+            return PRIVATE_DNS_WARNING_NONE;
+
+        return DatabaseHelper.getInstance(context).hasRecentAllowedDot(
+                System.currentTimeMillis() - PRIVATE_DNS_WARNING_WINDOW_MS)
+                ? PRIVATE_DNS_WARNING_ALLOWED_DOT : PRIVATE_DNS_WARNING_NONE;
+    }
+
+    static boolean shouldShowPrivateDnsWarning(int previousState, int currentState) {
+        return currentState != PRIVATE_DNS_WARNING_NONE && previousState != currentState;
+    }
+
+    static boolean shouldClearPrivateDnsWarning(int currentState) {
+        return currentState == PRIVATE_DNS_WARNING_NONE;
+    }
+
+    static long getPrivateDnsWarningExpiryDelay(long nowMs, long latestEvidenceMs) {
+        if (latestEvidenceMs < 0)
+            return -1;
+        return Math.max(1, latestEvidenceMs + PRIVATE_DNS_WARNING_WINDOW_MS - nowMs);
+    }
+
+    private void updateUnderlyingNetworks() {
+        // Set underlying network so Android can correctly assess connectivity,
+        // metering, and network scoring for the VPN.
+        // Mirrors DuckDuckGo ATP approach (Apache 2.0).
+        try {
+            Network active = getActiveNetwork();
+            if (active == null) {
+                Log.i(TAG, "Clearing underlying networks");
+                setUnderlyingNetworks(null);
+            } else {
+                Log.i(TAG, "Setting underlying network=" + active);
+                setUnderlyingNetworks(new Network[]{active});
+            }
+        } catch (Throwable ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+    }
+
+    private Builder getBuilder(List<Rule> listAllowed, List<Rule> listRule) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        boolean ip6 = prefs.getBoolean("ip6", true);
+        boolean includeSystem = prefs.getBoolean("include_system_vpn", false);
+
+        // Build VPN service
+        Builder builder = new Builder();
+        builder.setSession(getString(R.string.app_name));
+
+        // Android defaults VPNs to metered, which makes every app on the device
+        // treat an unmetered Wi-Fi as metered while the VPN runs (#959). Passing
+        // false does not force the network unmetered: it tells the platform to
+        // inherit meteredness from the underlying networks, so the VPN tracks
+        // the physical network as it changes. Snapshotting isMeteredNetwork()
+        // here cannot do that — the value is read once per establish, is true
+        // whenever there is no active network yet (a boot or always-on start
+        // before Wi-Fi associates), and then never reaches the live interface
+        // again while the tunnel lives.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            builder.setMetered(false);
+
+        // Use blocking I/O on the TUN file descriptor for CPU efficiency
+        // (avoids polling when there is no traffic)
+        builder.setBlocking(true);
+
+        // VPN address
+        // When WG is on, prefer the addresses from [Interface] Address. Inner
+        // packets have to carry a source IP that matches what the WG peer
+        // accepts per its AllowedIPs for our peer entry — using the default
+        // 10.1.10.1 makes the peer drop everything (handshake works, but no
+        // data ever flows back).
+        boolean wgEnabled = prefs.getBoolean("wg_enabled", false);
+        String wgConfigText = wgEnabled ? prefs.getString("wg_config", "") : "";
+        net.kollnig.missioncontrol.wg.WgConfig wgParsed = null;
+        String wgVpn4 = null;
+        String wgVpn6 = null;
+        List<String> wgAllowedIps = new ArrayList<>();
+        List<InetAddress> dnsServers = null;
+        if (wgEnabled && !TextUtils.isEmpty(wgConfigText)) {
+            try {
+                wgParsed = net.kollnig.missioncontrol.wg.WgConfigParser.INSTANCE.parse(wgConfigText);
+                for (net.kollnig.missioncontrol.wg.WgPeer peer : wgParsed.getPeers())
+                    wgAllowedIps.addAll(peer.getAllowedIPs());
+                for (String addr : wgParsed.getAddress()) {
+                    String ip = addr.split("/")[0].trim();
+                    if (ip.contains(":")) {
+                        if (wgVpn6 == null) wgVpn6 = ip;
+                    } else {
+                        if (wgVpn4 == null) wgVpn4 = ip;
+                    }
+                }
+                dnsServers = getWireGuardDns(wgParsed);
+                if (dnsServers.isEmpty()) {
+                    Log.w(TAG, "WG config has no usable numeric DNS; using protected public fallback DNS");
+                    dnsServers = getDefaultDns(ip6);
+                }
+            } catch (Throwable ex) {
+                Log.w(TAG, "WG config parse failed for builder: " + ex.getMessage());
+            }
+        }
+        String vpn4 = wgVpn4 != null ? wgVpn4 : prefs.getString("vpn4", "10.1.10.1");
+        Log.i(TAG, "Using VPN4=" + vpn4 + (wgVpn4 != null ? " (from WG config)" : ""));
+        builder.addAddress(vpn4, 32);
+        if (ip6) {
+            String vpn6 = wgVpn6 != null ? wgVpn6
+                    : prefs.getString("vpn6", "fd00:1:fd00:1:fd00:1:fd00:1");
+            Log.i(TAG, "Using VPN6=" + vpn6 + (wgVpn6 != null ? " (from WG config)" : ""));
+            builder.addAddress(vpn6, 128);
+        }
+
+        // DNS address
+        if (dnsServers == null)
+            dnsServers = getDns(ServiceSinkhole.this);
+        for (InetAddress dns : dnsServers) {
+            if (ip6 || dns instanceof Inet4Address) {
+                Log.i(TAG, "Using DNS=" + dns + (wgEnabled ? " (protected by WG)" : ""));
+                builder.addDnsServer(dns);
+            }
+        }
+
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            Network active = (cm == null ? null : cm.getActiveNetwork());
+            LinkProperties props = (active == null ? null : cm.getLinkProperties(active));
+            String domain = (props == null ? null : props.getDomains());
+            if (domain != null) {
+                Log.i(TAG, "Using search domain=" + domain);
+                builder.addSearchDomain(domain);
+            }
+        } catch (Throwable ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+
+        // WireGuard AllowedIPs can opt RFC 1918 ranges into the VPN routes;
+        // without WireGuard, private and reserved ranges remain excluded.
+        // Tethering compatibility mode instead installs a plain default route,
+        // which some devices need before they forward tethered traffic into the
+        // tun at all (#699). WireGuard keeps precedence: a full tunnel would
+        // hand LAN and reserved traffic to the peer, which drops it.
+        boolean tetheringCompat = prefs.getBoolean("tcp_mss_clamp", false);
+        List<IPUtil.CIDR> routes;
+        if (wgEnabled && !wgAllowedIps.isEmpty()) {
+            if (tetheringCompat)
+                Log.i(TAG, "Tethering compatibility routes skipped: WireGuard AllowedIPs apply");
+            routes = VpnRoutes.getRoutes(wgAllowedIps);
+        } else if (tetheringCompat) {
+            Log.i(TAG, "Using tethering compatibility routes (full tunnel)");
+            routes = VpnRoutes.getTetheringRoutes();
+        } else
+            routes = VpnRoutes.getRoutes();
+        for (IPUtil.CIDR route : routes)
+            try {
+                builder.addRoute(route.address, route.prefix);
+            } catch (Throwable ex) {
+                Log.e(TAG, "addRoute " + route + ": " + ex);
+            }
+
+        // Add host routes for DNS servers not necessarily covered by the general
+        // VPN routes. IPv4 LAN resolvers are excluded from VpnRoutes, while IPv6
+        // ULA resolvers are outside the 2000::/3 global-unicast route below.
+        // Keeping both inside the tunnel ensures DNS remains reachable and passes
+        // through TC's filtering path.
+        List<InetAddress> routedDnsServers = new ArrayList<>();
+        for (InetAddress dns : dnsServers != null ? dnsServers : getDns(ServiceSinkhole.this))
+            if ((dns instanceof Inet4Address && dns.isSiteLocalAddress()) ||
+                    dns instanceof Inet6Address)
+                try {
+                    Log.i(TAG, "Adding DNS host route=" + dns.getHostAddress());
+                    builder.addRoute(dns, dns instanceof Inet4Address ? 32 : 128);
+                    routedDnsServers.add(dns);
+                } catch (Throwable ex) {
+                    Log.e(TAG, "addRoute DNS " + dns + ": " + ex);
+                }
+
+        // The route covers the whole address, not just port 53, and everything
+        // on it is now re-sent from our socket — so our permission decides its
+        // reachability for every app (#785). Replace this state once per tunnel
+        // build; it must not share the process-local runtime observation latch.
+        net.kollnig.missioncontrol.LocalNetworkAccess.setRoutedResolvers(routedDnsServers);
+
+        // Android 17 refuses local network traffic without ACCESS_LOCAL_NETWORK:
+        // TCP times out, UDP fails with EPERM. A LAN resolver routed into the tun
+        // above is re-sent from our own socket (#701). Port 53 survives Android's
+        // exemption, so name resolution keeps working while the rest of that
+        // address — the router's web UI is the common one — goes silent for every
+        // app behind the tunnel (#785). Neither symptom is attributed to a
+        // permission, and the banner only reaches someone who opens the app.
+        // Notify, so the reason meets the user where the failure appears.
+        if (net.kollnig.missioncontrol.LocalNetworkAccess.isMissing(ServiceSinkhole.this)) {
+            Log.w(TAG, "Local network access not granted: LAN destinations are" +
+                    " unreachable, whether configured (custom DNS, Secure DNS resolver," +
+                    " WireGuard peer, proxy) or routed into the tun as a resolver");
+            showLocalNetworkNotification();
+        } else
+            clearLocalNetworkNotification();
+
+        // Blocking port 853 is what lets us keep seeing DNS: with Private DNS on
+        // "automatic", Android falls back to plaintext and detection carries on.
+        // In "hostname" mode it does not fall back — the user picked that
+        // resolver explicitly, so DNS simply fails and nothing resolves. That
+        // looks like TC broke the connection, with no hint of why, so say it.
+        if (Util.isPrivateDnsBlocked(this)) {
+            Log.w(TAG, "Private DNS set to a hostname: DoT is blocked and Android will not" +
+                    " fall back to plaintext DNS, so name resolution fails");
+            showPrivateDnsNotification(Util.getPrivateDnsSpecifier(this));
+        } else
+            clearPrivateDnsNotification();
+
+        updatePrivateDnsBypassWarning();
+
+        // Dynamically exclude carrier ePDG IPs so Wi-Fi calling works globally.
+        // ePDG domains follow 3GPP standard: epdg.epc.mnc{MNC}.mcc{MCC}.pub.3gppnetwork.org
+        // TC excludes itself from the VPN (addDisallowedApplication), so this DNS resolution
+        // goes through the physical network — using the carrier's own DNS on cellular,
+        // which avoids geo-fencing issues. Re-resolved on each VPN rebuild (network switch).
+        // Uses a short timeout to avoid blocking VPN startup if resolution is slow.
+        // Requires Android 13+ (API 33) for excludeRoute().
+        if (Build.VERSION.SDK_INT >= 33)
+            try {
+                TelephonyManager tm = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+                String simOperator = (tm == null ? null : tm.getSimOperator());
+                if (simOperator != null && simOperator.length() >= 5) {
+                    String mcc = simOperator.substring(0, 3);
+                    String mnc = simOperator.substring(3);
+                    if (mnc.length() == 2)
+                        mnc = "0" + mnc;
+                    String epdgDomain = "epdg.epc.mnc" + mnc + ".mcc" + mcc + ".pub.3gppnetwork.org";
+                    Log.i(TAG, "Resolving ePDG domain=" + epdgDomain);
+
+                    // Resolve with 1.5s timeout to avoid blocking VPN startup
+                    final String domain = epdgDomain;
+                    java.util.concurrent.Future<InetAddress[]> future =
+                            EPDG_RESOLVER.submit(() -> InetAddress.getAllByName(domain));
+                    try {
+                        InetAddress[] addrs = future.get(1500, java.util.concurrent.TimeUnit.MILLISECONDS);
+                        for (InetAddress addr : addrs) {
+                            Log.i(TAG, "Excluding ePDG address=" + addr.getHostAddress());
+                            builder.excludeRoute(new IpPrefix(addr, addr instanceof Inet4Address ? 32 : 128));
+                        }
+                    } finally {
+                        // A timed-out lookup must not linger: cancel it rather than let
+                        // it occupy a resolver thread until the real DNS query returns
+                        // (radio wakeup on a battery-constrained path).
+                        future.cancel(true);
+                    }
+                }
+            } catch (java.util.concurrent.TimeoutException ex) {
+                Log.i(TAG, "ePDG resolution timed out, skipping");
+            } catch (Throwable ex) {
+                // Resolution may fail (no SIM, airplane mode, non-standard carrier) — not fatal
+                Log.i(TAG, "ePDG resolution skipped: " + ex.getMessage());
+            }
+
+        Log.i(TAG, "IPv6=" + ip6);
+        if (ip6)
+            builder.addRoute("2000::", 3); // unicast
+
+        // MTU
+        int mtu = jni_get_mtu();
+        if (wgEnabled) {
+            // WG default is 1420 (1500 path MTU minus typical WG+UDP+IP overhead).
+            // Allow the config's [Interface] MTU to override but never exceed
+            // the safe default — going higher invites fragmentation.
+            int wgMtu = 1420;
+            if (wgParsed != null) {
+                try {
+                    if (wgParsed.getMtu() != null && wgParsed.getMtu() > 0 && wgParsed.getMtu() < wgMtu)
+                        wgMtu = wgParsed.getMtu();
+                } catch (Throwable ignored) {
+                    // Bad config — let the validation in ActivitySettings handle the user message.
+                }
+            }
+            if (wgMtu < mtu) mtu = wgMtu;
+        }
+        Log.i(TAG, "MTU=" + mtu);
+        builder.setMtu(mtu);
+
+        // Add list of allowed applications
+        try {
+            builder.addDisallowedApplication(getPackageName());
+        } catch (PackageManager.NameNotFoundException ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+        for (Rule rule : listRule)
+            // Exclude from VPN if explicitly excluded OR if system app and includeSystem is
+            // false
+            if (!rule.apply || (!includeSystem && rule.system))
+                try {
+                    Log.i(TAG, "Not routing " + rule.packageName);
+                    builder.addDisallowedApplication(rule.packageName);
+                } catch (PackageManager.NameNotFoundException ex) {
+                    Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                }
+
+        // Build configure intent
+        Intent configure = new Intent(this, ActivityMain.class);
+        PendingIntent pi = PendingIntentCompat.getActivity(this, 0, configure, PendingIntent.FLAG_UPDATE_CURRENT);
+        builder.setConfigureIntent(pi);
+
+        return builder;
+    }
+
+    private Builder getBlockingBuilder(List<Rule> listRule) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        boolean ip6 = prefs.getBoolean("ip6", true);
+        boolean includeSystem = prefs.getBoolean("include_system_vpn", false);
+
+        Builder builder = new Builder();
+        builder.setSession(getString(R.string.app_name));
+        builder.setBlocking(true);
+        builder.setMtu(1280);
+        // Inherit meteredness from the underlying networks, as getBuilder does:
+        // the placeholder must not flip apps to metered mid-replacement.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            builder.setMetered(false);
+
+        builder.addAddress("192.0.2.1", 32);
+        builder.addRoute("0.0.0.0", 0);
+        if (ip6) {
+            builder.addAddress("2001:db8::1", 128);
+            builder.addRoute("::", 0);
+        }
+
+        try {
+            builder.addDisallowedApplication(getPackageName());
+        } catch (PackageManager.NameNotFoundException ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+
+        for (Rule rule : listRule)
+            if (!rule.apply || (!includeSystem && rule.system))
+                try {
+                    builder.addDisallowedApplication(rule.packageName);
+                } catch (PackageManager.NameNotFoundException ex) {
+                    Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                }
+
+        Intent configure = new Intent(this, ActivityMain.class);
+        PendingIntent pi = PendingIntentCompat.getActivity(this, 0, configure, PendingIntent.FLAG_UPDATE_CURRENT);
+        builder.setConfigureIntent(pi);
+        return builder;
+    }
+
+    private boolean startNative(final ParcelFileDescriptor vpn, List<Rule> listAllowed, List<Rule> listRule) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+        boolean log = prefs.getBoolean("log", false);
+        boolean log_app = prefs.getBoolean("log_app", true);
+        boolean tcpMssClamp = prefs.getBoolean("tcp_mss_clamp", false);
+        Log.i(TAG, "Start native log=" + log + "/" + log_app +
+                " filter=true tcp_mss_clamp=" + tcpMssClamp);
+
+        // Prepare rules
+        prepareUidAllowed(listAllowed, listRule);
+        prepareHostsBlocked(ServiceSinkhole.this);
+        prepareForwarding();
+
+        int prio = Integer.parseInt(prefs.getString("loglevel", Integer.toString(Log.WARN)));
+        final int rcode = Integer.parseInt(prefs.getString("rcode", "3"));
+        // Port 53 is the only UDP traffic that skips the UID lookup entirely
+        // today, so turning fwd53 on costs a lookup, a JNI upcall and a real
+        // UDP session per query. Only pay that when some app is routed around
+        // the tunnel and a non-null underlying resolver target is available —
+        // which are both properties of the resolved rules, not of the mode: a
+        // per-app override sends an app direct in either mode, and gating on
+        // the mode alone left such an app tunnelling its DNS while its traffic
+        // went direct, exactly the split the redirect exists to avoid.
+        // Native consumes fwd53 for UDP only (udp.c), so a TCP-only port 53
+        // rule must not turn it on: rules are keyed by protocol now.
+        final boolean fwd53 = mapForward.containsKey(forwardKey(17 /* UDP */, 53))
+                || RemoteRoutingLogic.redirectDirectDns(anyDirectRouting,
+                        directDnsTarget != null);
+        if (prefs.getBoolean("socks5_enabled", false))
+            jni_socks5(
+                    prefs.getString("socks5_addr", ""),
+                    Integer.parseInt(prefs.getString("socks5_port", "0")),
+                    prefs.getString("socks5_username", ""),
+                    prefs.getString("socks5_password", ""));
+        else
+            jni_socks5("", 0, "", "");
+
+        jni_sni(prefs.getBoolean("sni_enabled", false));
+        pushRoutingToNative();
+        updateUnderlyingNetworks();
+
+        // WireGuard egress. startOrUpdate is idempotent: same config +
+        // same TUN fd is a no-op, so reload-induced "Native restart"
+        // calls (where the VPN PFD is reused) won't re-handshake WG.
+        // It also handles the disable case internally — no need to gate.
+        net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.setRecoveryCallbacks(
+                () -> ServiceSinkhole.reload("wireguard connectivity repair", ServiceSinkhole.this, false),
+                () -> showWireGuardErrorNotification(getString(R.string.msg_wg_recovery_failed)),
+                () -> net.kollnig.missioncontrol.wg.WgRelayFailover.attemptFailover(ServiceSinkhole.this,
+                        new net.kollnig.missioncontrol.wg.WgRelayFailover.Listener() {
+                            @Override
+                            public void onIdentityRenewed(String providerLabel) {
+                                showWireGuardIdentityNotification(providerLabel);
+                            }
+
+                            @Override
+                            public void onProviderRejected(String providerLabel, String message) {
+                                // Handing this to WgEgress rather than
+                                // notifying from here is deliberate: this runs
+                                // mid-failover, off-thread, and the tunnel it
+                                // describes may already have been replaced.
+                                // WgEgress publishes it against the tunnel it
+                                // belongs to, which notifies through the state
+                                // listener and outlives the generic recovery
+                                // check that would otherwise overwrite it.
+                                net.kollnig.missioncontrol.wg.WgEgress.INSTANCE
+                                        .reportProviderFailure(getString(
+                                                R.string.msg_wg_provider_rejected, providerLabel,
+                                                message == null ? "" : message));
+                            }
+
+                            @Override
+                            public void onAccountExpired(String providerLabel) {
+                                // Published the same way as a rejection, for
+                                // the same reason — but with its own message,
+                                // since retrying cannot fix an account that
+                                // has run out of time.
+                                net.kollnig.missioncontrol.wg.WgEgress.INSTANCE
+                                        .reportProviderFailure(getString(
+                                                R.string.msg_wg_account_expired, providerLabel));
+                            }
+                        }));
+        jni_wireguard_required(prefs.getBoolean("wg_enabled", false)
+                && !TextUtils.isEmpty(prefs.getString("wg_config", "")));
+        boolean wgOk = net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.startOrUpdate(
+                prefs.getBoolean("wg_enabled", false),
+                prefs.getString("wg_config", ""),
+                ServiceSinkhole.this,
+                vpn,
+                Util.isInteractive(ServiceSinkhole.this),
+                prefs.getBoolean("wg_keepalive_when_screen_off", false),
+                () -> jni_wireguard_start(),
+                () -> { jni_wireguard_stop(); return kotlin.Unit.INSTANCE; });
+        if (!wgOk) {
+            String wgError = net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.getLastError();
+            Log.w(TAG, "WireGuard egress failed to start; blocking traffic: " + wgError);
+            showWireGuardErrorNotification(wgError);
+            scheduleWireGuardStartupRecovery();
+            return false;
+        }
+        cancelWireGuardStartupRecovery(true);
+        net.kollnig.missioncontrol.wg.VpnKeyRotationManager.maybeRotateDue(ServiceSinkhole.this);
+
+        if (tunnelThread == null) {
+            Log.i(TAG, "Starting tunnel thread context=" + jni_context);
+            jni_start(jni_context, prio, tcpMssClamp);
+
+            tunnelThread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    Log.i(TAG, "Running tunnel context=" + jni_context);
+                    jni_run(jni_context, vpn.getFd(), fwd53, rcode);
+                    Log.i(TAG, "Tunnel exited");
+                    tunnelThread = null;
+                }
+            });
+            // tunnelThread.setPriority(Thread.MAX_PRIORITY);
+            tunnelThread.start();
+
+            Log.i(TAG, "Started tunnel thread");
+        }
+
+        cancelNativeRecovery(false);
+        return true;
+    }
+
+    private void stopNative(ParcelFileDescriptor vpn) {
+        Log.i(TAG, "Stop native");
+
+        if (tunnelThread != null) {
+            Log.i(TAG, "Stopping tunnel thread");
+
+            jni_stop(jni_context);
+
+            Thread thread = tunnelThread;
+            while (thread != null && thread.isAlive()) {
+                try {
+                    Log.i(TAG, "Joining tunnel thread context=" + jni_context);
+                    thread.join();
+                } catch (InterruptedException ignored) {
+                    Log.i(TAG, "Joined tunnel interrupted");
+                }
+                thread = tunnelThread;
+            }
+            tunnelThread = null;
+
+            Log.i(TAG, "Stopped tunnel thread");
+        }
+
+        // Clear the session list even when there was no thread to join. When
+        // jni_run() returns on a native error the tunnel thread nulls
+        // tunnelThread itself, so the recovery restart arrives here with
+        // nothing to stop — but the context still holds every session that run
+        // built up. jni_start() keeps ctx->ng_session, and the new epoll
+        // instance registers only the pipe and tun, so those UDP/ICMP sockets
+        // would never be polled again while still holding their descriptors.
+        // Nothing can race this: either the thread was joined above, or it has
+        // already exited.
+        synchronized (jni_lock) {
+            if (jni_context != 0)
+                jni_clear(jni_context);
+        }
+
+        // NOTE: WireGuard is intentionally NOT torn down here. NetGuard's
+        // reload() does a "Native restart" (stopNative + startNative on the
+        // same PFD) for transient events like DHCP/connectivity changes —
+        // tearing down WG every time would cause a fresh handshake every
+        // few seconds. WgEgress.stop() is invoked from the actual stop()
+        // path below.
+    }
+
+    private void updateWireGuardInteractiveState(boolean interactive) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+        boolean wgEnabled = prefs.getBoolean("wg_enabled", false);
+        boolean keepaliveAlwaysOn = prefs.getBoolean("wg_keepalive_when_screen_off", false);
+        String wgConfig = prefs.getString("wg_config", "");
+        if (!wgEnabled || TextUtils.isEmpty(wgConfig))
+            return;
+
+        net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.onInteractiveStateChanged(
+                true,
+                wgConfig,
+                interactive,
+                keepaliveAlwaysOn);
+    }
+
+    private void unprepare() {
+        lock.writeLock().lock();
+        mapUidAllowed.clear();
+        mapUidKnown.clear();
+        mapHostsBlocked.clear();
+        mapForward.clear();
+        lock.writeLock().unlock();
+    }
+
+    private void prepareUidAllowed(List<Rule> listAllowed, List<Rule> listRule) {
+        lock.writeLock().lock();
+
+        mapUidAllowed.clear();
+        for (Rule rule : listAllowed)
+            mapUidAllowed.put(rule.uid, true);
+
+        mapUidKnown.clear();
+        for (Rule rule : listRule)
+            mapUidKnown.put(rule.uid, rule.uid);
+
+        // Per-app routing only means anything when a remote tunnel exists to
+        // route around. With WireGuard off, wg_route_mode/wg_route prefs must
+        // not linger into costing every DNS query the fwd53 UID-lookup/upcall
+        // path below: collapse to the no-tunnel defaults instead of resolving
+        // them from stale preferences.
+        if (hasActiveWireGuard(PreferenceManager.getDefaultSharedPreferences(this))) {
+            defaultTunnel = RemoteRoutingLogic.defaultTunnel(
+                    RemoteRoutingLogic.normalizeMode(
+                            PreferenceManager.getDefaultSharedPreferences(this)
+                                    .getString(Rule.PREF_WG_ROUTE_MODE,
+                                            RemoteRoutingLogic.getDefaultMode())));
+            mapUidRouteOverride = mapUidRouteOverride(listRule, defaultTunnel);
+            anyDirectRouting = anyDirectRouting(listRule);
+            // Util.getDefaultDNS does binder calls, so resolve it once per reload
+            // rather than on the DNS path.
+            directDnsTarget = resolveDirectDnsTarget();
+        } else {
+            defaultTunnel = true;
+            mapUidRouteOverride = new HashSet<>();
+            anyDirectRouting = false;
+            directDnsTarget = null;
+        }
+
+        lock.writeLock().unlock();
+    }
+
+    /**
+     * The UIDs whose routing differs from the global default.
+     * <p>
+     * A shared UID is tunnelled if any of its packages is: the packet path only
+     * ever sees the UID, so the finer per-package answer cannot be honoured and
+     * the more private of the two is the right way to round.
+     * <p>
+     * Bypassed apps are skipped rather than counted as direct. They are handed
+     * to {@code addDisallowedApplication}, so no packet of theirs ever reaches
+     * the tun — listing them would put an entry in the override set for every
+     * bypassed app and defeat the empty-set fast path for no benefit.
+     */
+    private static Set<Integer> mapUidRouteOverride(List<Rule> listRule, boolean defaultTunnel) {
+        Map<Integer, Boolean> tunnelByUid = new HashMap<>();
+        for (Rule rule : listRule) {
+            if (!rule.apply)
+                continue;
+            Boolean current = tunnelByUid.get(rule.uid);
+            tunnelByUid.put(rule.uid, (current != null && current) || rule.wg_route);
+        }
+
+        Set<Integer> overrides = new HashSet<>();
+        for (Map.Entry<Integer, Boolean> entry : tunnelByUid.entrySet())
+            if (RemoteRoutingLogic.isRouteOverride(entry.getValue(), defaultTunnel))
+                overrides.add(entry.getKey());
+        return overrides;
+    }
+
+    /**
+     * The system resolver for apps routed around the remote tunnel.
+     * <p>
+     * With the tunnel up, the tun advertises the tunnel's own resolvers, which
+     * a direct app may not be able to reach at all. Redirecting its queries to
+     * the underlying network's resolver is what makes direct routing work when
+     * the tunnel drops — at the cost, stated in the UI, of that app's DNS being
+     * visible to its local network rather than to the VPN provider.
+     */
+    private String resolveDirectDnsTarget() {
+        List<String> sysDns = Util.getDefaultDNS(ServiceSinkhole.this);
+
+        // Mirror the "ip6" preference gate that getDns()/collectDns() apply to
+        // the normal resolver list: only accept an IPv6 resolver when IPv6 is
+        // enabled at all. Unlike getDns(), no separate IPv6-only fallback pass
+        // is needed here – the first usable candidate, of either family, wins.
+        boolean allowIp6 = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this)
+                .getBoolean("ip6", true);
+
+        for (String dns : sysDns) {
+            if (TextUtils.isEmpty(dns) || !Util.isNumericAddress(dns))
+                continue;
+
+            // getDefaultDNS() already stripped any interface scope, so a
+            // link-local candidate here can never be reached from the tun –
+            // avoid handing it to a direct app. A numeric string never
+            // triggers a resolver lookup, so getByName() is safe to call.
+            InetAddress address;
+            try {
+                address = InetAddress.getByName(dns);
+            } catch (Throwable ex) {
+                continue;
+            }
+
+            if (isUsableDns(address, allowIp6))
+                return dns;
+        }
+
+        Log.w(TAG, "No system DNS for direct apps; keeping their DNS in the tunnel");
+        return null;
+    }
+
+    private static boolean anyDirectRouting(List<Rule> listRule) {
+        for (Rule rule : listRule)
+            if (rule.apply && !rule.wg_route)
+                return true;
+        return false;
+    }
+
+    /**
+     * Whether this UID is routed around the remote tunnel. Mirrors the native
+     * is_tunnel_uid: a UID absent from the override set follows the global
+     * default rather than counting as "not tunnelled", which a bare
+     * mapUidRouteOverride lookup would wrongly report.
+     */
+    private boolean routesDirect(int uid) {
+        return RemoteRoutingLogic.routesDirect(
+                mapUidRouteOverride.contains(uid), defaultTunnel);
+    }
+
+    /** Hands the current routing decision to the packet path. */
+    private void pushRoutingToNative() {
+        lock.readLock().lock();
+        int[] uids = new int[mapUidRouteOverride.size()];
+        int i = 0;
+        for (Integer uid : mapUidRouteOverride)
+            uids[i++] = uid;
+        boolean defaults = defaultTunnel;
+        boolean dnsDirect = RemoteRoutingLogic.redirectDirectDns(anyDirectRouting,
+                directDnsTarget != null);
+        lock.readLock().unlock();
+
+        jni_wireguard_route(uids, defaults, dnsDirect);
+    }
+
+    public static void prepareHostsBlocked(Context c) {
+        BufferedReader br = null;
+        InputStreamReader is = null;
+        boolean locked = false;
+        File hosts = new File(c.getFilesDir(), "hosts.txt");
+        boolean hostsFile = false;
+        long hostsModified = 0;
+        HostsBlocklistLogic.State hostsState = new HostsBlocklistLogic.State(
+                mapHostsBlocked, last_hosts_modified, message -> Log.i(TAG, message));
+
+        try {
+            hostsFile = hosts.exists() && hosts.canRead();
+            if (!hostsFile) {
+                if (mapHostsBlocked.size() > 0) {
+                    Log.i(TAG, "Hosts file unchanged");
+                    return;
+                }
+                is = new InputStreamReader(c.getAssets().open("hosts.txt"));
+            } else {
+                hostsModified = hosts.lastModified();
+                if (!hostsState.shouldReload(hostsModified)) {
+                    Log.i(TAG, "Hosts file unchanged");
+                    return;
+                }
+                is = new FileReader(hosts);
+            }
+
+            lock.writeLock().lock();
+            locked = true;
+
+            br = new BufferedReader(is);
+            if (hostsFile) {
+                hostsState.load(br, hostsModified);
+                last_hosts_modified = hostsState.getLastModified();
+            } else
+                hostsState.parse(br);
+        } catch (IOException ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        } finally {
+            if (br != null)
+                try {
+                    br.close();
+                } catch (IOException exex) {
+                    Log.e(TAG, exex.toString() + "\n" + Log.getStackTraceString(exex));
+                }
+            if (is != null)
+                try {
+                    is.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            // Only unlock if we actually acquired the lock. Opening the hosts
+            // source above can throw before lock() runs, and an unconditional
+            // unlock would then raise IllegalMonitorStateException and crash the
+            // VPN service.
+            if (locked)
+                lock.writeLock().unlock();
+        }
+
+        // Reload TrackerList to ensure it stays in sync with updated hosts
+        TrackerList.reloadTrackerData(c);
+        clearTrackerCaches();
+    }
+
+    // mapForward is keyed by protocol and port together, not port alone: a
+    // TCP rule and a UDP rule for the same port are independent, and must
+    // not overwrite or match each other.
+    private static int forwardKey(int protocol, int dport) {
+        return (protocol << 16) | dport;
+    }
+
+    private void prepareForwarding() {
+        lock.writeLock().lock();
+        try {
+        mapForward.clear();
+
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        try (Cursor cursor = DatabaseHelper.getInstance(ServiceSinkhole.this).getForwarding()) {
+            int colProtocol = cursor.getColumnIndex("protocol");
+            int colDPort = cursor.getColumnIndex("dport");
+            int colRAddr = cursor.getColumnIndex("raddr");
+            int colRPort = cursor.getColumnIndex("rport");
+            int colRUid = cursor.getColumnIndex("ruid");
+            while (cursor.moveToNext()) {
+                Forward fwd = new Forward();
+                fwd.protocol = cursor.getInt(colProtocol);
+                fwd.dport = cursor.getInt(colDPort);
+                fwd.raddr = cursor.getString(colRAddr);
+                fwd.rport = cursor.getInt(colRPort);
+                fwd.ruid = cursor.getInt(colRUid);
+                mapForward.put(forwardKey(fwd.protocol, fwd.dport), fwd);
+                Log.i(TAG, "Forward " + fwd);
+            }
+        }
+
+        // Add DoH DNS forwarding only when WireGuard is not owning DNS. This
+        // includes configs without a DNS line: getBuilder() installs a
+        // protected public fallback for those configs, and the DoH client is
+        // excluded from this VPN so it cannot be safely chained through WG.
+        if (prefs.getBoolean("doh_enabled", false) && !hasActiveWireGuard(prefs)) {
+            Forward dnsFwd = new Forward();
+            dnsFwd.protocol = 17; // UDP
+            dnsFwd.dport = 53;
+            dnsFwd.raddr = net.kollnig.missioncontrol.dns.DnsProxyServer.DNS_PROXY_ADDRESS;
+            dnsFwd.rport = net.kollnig.missioncontrol.dns.DnsProxyServer.DNS_PROXY_PORT;
+            dnsFwd.ruid = android.os.Process.myUid();
+            mapForward.put(forwardKey(dnsFwd.protocol, dnsFwd.dport), dnsFwd);
+            Log.i(TAG, "DoH Forward " + dnsFwd);
+
+            // mapForward is now keyed by protocol and port, so port 53 TCP
+            // needs its own entry to still be caught alongside UDP.
+            Forward dnsFwdTcp = new Forward();
+            dnsFwdTcp.protocol = 6; // TCP
+            dnsFwdTcp.dport = 53;
+            dnsFwdTcp.raddr = dnsFwd.raddr;
+            dnsFwdTcp.rport = dnsFwd.rport;
+            dnsFwdTcp.ruid = dnsFwd.ruid;
+            mapForward.put(forwardKey(dnsFwdTcp.protocol, dnsFwdTcp.dport), dnsFwdTcp);
+            Log.i(TAG, "DoH Forward " + dnsFwdTcp);
+        }
+
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    private List<Rule> getAllowedRules(List<Rule> listRule) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+
+        // Check state
+        boolean wifi = Util.isWifiActive(this);
+        boolean metered = Util.isMeteredNetwork(this);
+        boolean useMetered = prefs.getBoolean("use_metered", false);
+        String ssidNetwork = Util.getWifiSSID(this);
+
+        // Update connected state
+        last_connected = Util.isConnected(ServiceSinkhole.this);
+
+        boolean org_metered = metered;
+
+        // Update metered state
+        if (wifi && !useMetered)
+            metered = false;
+        last_metered = metered;
+
+        Log.i(TAG, "Get allowed" +
+                " connected=" + last_connected +
+                " wifi=" + wifi +
+                " network=" + ssidNetwork +
+                " metered=" + metered + "/" + org_metered +
+                " rules=" + listRule.size());
+
+        return new ArrayList<>(listRule);
+    }
+
+    private void stopVPN(ParcelFileDescriptor pfd) {
+        Log.i(TAG, "Stopping");
+        try {
+            pfd.close();
+        } catch (IOException ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+    }
+
+    // Called from native code
+    private void nativeExit(int error, String reason) {
+        Log.w(TAG, "Native exit error=" + error + " reason=" + reason);
+        if (reason != null) {
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+
+            // A native exit while TC is disabled or intentionally paused is expected: stay silent.
+            if (!prefs.getBoolean("enabled", false) || temporarilyStopped)
+                return;
+
+            long delayMs = nativeRecoveryPolicy.onFailure(SystemClock.elapsedRealtime());
+            if (delayMs == FailureRecoveryPolicy.NO_RETRY) {
+                // Recovery budget exhausted: TC is going down, so surface the failure to the user.
+                Log.e(TAG, "Native recovery retry budget exhausted");
+                showErrorNotification(FailureRecoveryPolicy.isFileDescriptorExhaustion(error)
+                        ? getString(R.string.msg_native_fd_recovery_exhausted)
+                        : reason);
+                cancelNativeRecovery(false);
+                prefs.edit().putBoolean("enabled", false).apply();
+                WidgetMain.updateWidgets(this);
+                ServiceSinkhole.stop("native recovery exhausted", this, false);
+                return;
+            }
+
+            // Transient failure: recover transparently, without alarming the user.
+            nativeRecoveryHandler.removeCallbacks(nativeRecoveryRunnable);
+            nativeRecoveryHandler.postDelayed(nativeRecoveryRunnable, delayMs);
+            Log.w(TAG, "Scheduled native recovery in " + delayMs + " ms");
+        }
+    }
+
+    // Called from native code
+    private void nativeError(int error, String message) {
+        Log.w(TAG, "Native error " + error + ": " + message);
+        showErrorNotification(FailureRecoveryPolicy.isFileDescriptorExhaustion(error)
+                ? getString(R.string.msg_native_fd_error)
+                : message);
+    }
+
+    private void cancelNativeRecovery(boolean resetBudget) {
+        nativeRecoveryHandler.removeCallbacks(nativeRecoveryRunnable);
+        if (resetBudget)
+            nativeRecoveryPolicy.reset();
+    }
+
+    private void scheduleWireGuardStartupRecovery() {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        boolean active = !destroying && initialized && commandHandler != null
+                && state == State.enforcing && user_foreground
+                && prefs.getBoolean("enabled", false) && !temporarilyStopped
+                && vpn != null && VpnService.prepare(this) == null;
+        synchronized (wgStartupRecoveryLock) {
+            long delayMs = wgStartupRecoveryPolicy.onFailure(
+                    // Handler.postDelayed uses uptime; matching its clock
+                    // prevents deep sleep from aging a failure episode into
+                    // the stable window without a successful startup.
+                    SystemClock.uptimeMillis(), active);
+            if (!active) {
+                Log.i(TAG, "Skipping WireGuard startup recovery because protection is no longer active");
+                wgStartupRecoveryHandler.removeCallbacks(wgStartupRecoveryRunnable);
+                return;
+            }
+            if (delayMs == FailureRecoveryPolicy.NO_RETRY) {
+                if (wgStartupRecoveryPolicy.isPending())
+                    Log.i(TAG, "WireGuard startup recovery already pending");
+                else
+                    Log.e(TAG, "WireGuard startup recovery retry budget exhausted");
+                return;
+            }
+            if (!wgStartupRecoveryHandler.postDelayed(wgStartupRecoveryRunnable, delayMs)) {
+                wgStartupRecoveryPolicy.cancel(false);
+                Log.e(TAG, "Could not schedule WireGuard startup recovery");
+                return;
+            }
+            Log.w(TAG, "Scheduled WireGuard startup recovery in " + delayMs + " ms");
+        }
+    }
+
+    private void cancelWireGuardStartupRecovery(boolean resetBudget) {
+        synchronized (wgStartupRecoveryLock) {
+            wgStartupRecoveryHandler.removeCallbacks(wgStartupRecoveryRunnable);
+            wgStartupRecoveryPolicy.cancel(resetBudget);
+        }
+    }
+
+    private void scheduleVpnReplacementRecovery() {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        if (destroying || !initialized || commandHandler == null || state != State.enforcing
+                || !user_foreground || !prefs.getBoolean("enabled", false)
+                || temporarilyStopped || vpn == null || VpnService.prepare(this) != null) {
+            cancelVpnReplacementRecovery(false);
+            return;
+        }
+
+        long delayMs;
+        synchronized (vpnReplacementRecoveryLock) {
+            if (!vpnReplacementRecoveryPending.compareAndSet(false, true)) {
+                Log.i(TAG, "VPN replacement recovery already pending");
+                return;
+            }
+            delayMs = vpnReplacementRecoveryPolicy.onFailure(SystemClock.elapsedRealtime());
+            if (delayMs != FailureRecoveryPolicy.NO_RETRY)
+                commandHandler.postDelayed(vpnReplacementRecoveryRunnable, delayMs);
+        }
+        if (delayMs == FailureRecoveryPolicy.NO_RETRY) {
+            Log.e(TAG, "VPN replacement recovery retry budget exhausted");
+            cancelVpnReplacementRecovery(false);
+            showErrorNotification(vpnReplacementRecoveryExhaustedMessage(this), false);
+            return;
+        }
+
+        Log.w(TAG, "Scheduled VPN replacement recovery in " + delayMs + " ms");
+    }
+
+    private void cancelVpnReplacementRecovery(boolean resetBudget) {
+        synchronized (vpnReplacementRecoveryLock) {
+            vpnReplacementRecoveryPending.set(false);
+            if (commandHandler != null)
+                commandHandler.removeCallbacks(vpnReplacementRecoveryRunnable);
+            if (resetBudget)
+                vpnReplacementRecoveryPolicy.reset();
+        }
+    }
+
+    static String vpnReplacementRecoveryExhaustedMessage(Context context) {
+        return context.getString(R.string.msg_vpn_replacement_recovery_exhausted);
+    }
+
+    // Called from native code
+    private void logPacket(Packet packet) {
+        logHandler.queue(packet);
+    }
+
+    // Called from native code
+    private void dnsResolved(ResourceRecord rr) {
+        DatabaseHelper.DnsInsertOutcome outcome =
+                DatabaseHelper.getInstance(ServiceSinkhole.this).insertDns(rr);
+        if (outcome != DatabaseHelper.DnsInsertOutcome.FAILED) {
+            if (outcome == DatabaseHelper.DnsInsertOutcome.INSERTED) {
+                Log.i(TAG, "New IP " + rr);
+            }
+            invalidateTrackerCacheAfterDnsInsert(outcome, rr.Resource,
+                    Util.isNumericAddress(rr.Resource));
+        }
+    }
+
+    static final class DnsEvidence {
+        final Set<String> questions = new HashSet<>();
+        final Set<String> trackerQuestions = new HashSet<>();
+        final Set<String> minimalTrackerQuestions = new HashSet<>();
+
+        static DnsEvidence read(Cursor cursor) {
+            DnsEvidence result = new DnsEvidence();
+            if (cursor == null)
+                return result;
+            int questionColumn = cursor.getColumnIndexOrThrow("qname");
+            int targetColumn = cursor.getColumnIndexOrThrow("aname");
+            while (cursor.moveToNext()) {
+                String question = cursor.getString(questionColumn);
+                String target = cursor.getString(targetColumn);
+                if (question == null)
+                    continue;
+                result.questions.add(question);
+                // All targets from a resolution retain its original question.
+                // A benign target within it is not an independent shared host.
+                if (TrackerList.findTracker(question) != null
+                        || (target != null && TrackerList.findTracker(target) != null))
+                    result.trackerQuestions.add(question);
+                if (TrackerList.findMinimalTracker(question) != null
+                        || (target != null && TrackerList.findMinimalTracker(target) != null))
+                    result.minimalTrackerQuestions.add(question);
+            }
+            cursor.moveToPosition(-1);
+            return result;
+        }
+    }
+
+    static void invalidateTrackerCacheAfterDnsInsert(
+            DatabaseHelper.DnsInsertOutcome outcome, String resource,
+            boolean numericResource) {
+        if ((outcome == DatabaseHelper.DnsInsertOutcome.INSERTED
+                || outcome == DatabaseHelper.DnsInsertOutcome.REFRESHED)
+                && numericResource)
+            trackerCache.invalidate(resource);
+    }
+
+    // Called from WireGuard bridge for passive DNS response mapping.
+    public void wireGuardDnsResolved(String qname, String aname, String resource, int ttl) {
+        ResourceRecord rr = new ResourceRecord();
+        rr.Time = new Date().getTime();
+        rr.QName = qname;
+        rr.AName = aname;
+        rr.Resource = resource;
+        rr.TTL = ttl;
+        dnsResolved(rr);
+    }
+
+    // Called from native code
+    private boolean isDomainBlocked(String name) {
+        return false;
+    }
+
+    // Called from native code
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private int getUidQ(int version, int protocol, String saddr, int sport, String daddr, int dport) {
+        if (protocol != 6 /* TCP */ && protocol != 17 /* UDP */)
+            return Process.INVALID_UID;
+
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        if (cm == null)
+            return Process.INVALID_UID;
+
+        InetSocketAddress local = new InetSocketAddress(saddr, sport);
+        InetSocketAddress remote = new InetSocketAddress(daddr, dport);
+
+        Log.i(TAG, "Get uid local=" + local + " remote=" + remote);
+        int uid = cm.getConnectionOwnerUid(protocol, local, remote);
+        Log.i(TAG, "Get uid=" + uid);
+        return uid;
+    }
+
+    private boolean isSupported(int protocol) {
+        return (protocol == 1 /* ICMPv4 */ ||
+                protocol == 58 /* ICMPv6 */ ||
+                protocol == 6 /* TCP */ ||
+                protocol == 17 /* UDP */);
+    }
+
+    static ConcurrentHashMap<Integer, String> uidToApp = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Integer, String> uidToPackage = new ConcurrentHashMap<>();
+    // Hostname and tracker verdict are one immutable snapshot. Keeping them in
+    // one cache entry prevents a reader from observing only half a publication.
+    static final TrackerCache trackerCache = new TrackerCache();
+    static String NO_DNAME = "null"; // use a String, unequal the real null
+    static Tracker NO_TRACKER = new Tracker(null, null, 0);
+    // Negative results (no tracker / no dname for an IP) are cached only
+    // briefly so a later-captured DNS mapping is picked up quickly, instead of
+    // staying invisible for the full DNS TTL (up to 7 days).
+    private static final long NEGATIVE_TRACKER_CACHE_TTL_MS = 60 * 1000L;
+
+    public static void clearTrackerCaches() {
+        trackerCache.clear();
+    }
+
+    // Called from native code
+    private Allowed isAddressAllowed(Packet packet) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+
+        lock.readLock().lock();
+        Allowed allowed = null;
+        try {
+
+        // https://android.googlesource.com/platform/system/core/+/master/include/private/android_filesystem_config.h
+        if ((packet.uid < 2000) &&
+                !mapUidKnown.containsKey(packet.uid) && isSupported(packet.protocol)) {
+            // Allow unknown (system) traffic
+            packet.allowed = true;
+            Log.w(TAG, "Allowing unknown system " + packet);
+        } else if (packet.uid == Process.myUid()) {
+            // Allow self
+            packet.allowed = true;
+            Log.w(TAG, "Allowing self " + packet);
+        } else {
+            boolean filtered = false;
+
+            if (packet.data != null && !packet.data.isEmpty())
+                Log.d(TAG, "Found SNI in isAddressAllowed: " + packet.data);
+
+            // Check if tracker is known
+            // In minimal mode (including TC Slim), always enable blocking
+            if (blockKnownTracker(packet.daddr, packet.uid)) {
+                filtered = true;
+                packet.allowed = false;
+            }
+
+            InternetBlocklist internetBlocklist = InternetBlocklist.getInstance(ServiceSinkhole.this);
+            if (internetBlocklist.blockedInternet(packet.uid)) {
+                filtered = true;
+                packet.allowed = false;
+            }
+
+            if (!filtered)
+                packet.allowed = true;
+        }
+
+        // Block DNS-over-TLS (DoT) on port 853 to prevent bypassing DNS filtering
+        if (packet.allowed && packet.dport == 853 && prefs.getBoolean("block_dot", true)) {
+            Log.i(TAG, "Blocking DoT " + packet);
+            packet.allowed = false;
+        }
+
+        if (packet.allowed)
+            if (mapForward.containsKey(forwardKey(packet.protocol, packet.dport))) {
+                Forward fwd = mapForward.get(forwardKey(packet.protocol, packet.dport));
+                if (fwd.ruid == packet.uid) {
+                    allowed = new Allowed();
+                } else {
+                    allowed = new Allowed(fwd.raddr, fwd.rport);
+                    packet.data = "> " + fwd.raddr + "/" + fwd.rport;
+                }
+            } else if (packet.dport == 53 && directDnsTarget != null
+                    && routesDirect(packet.uid)) {
+                // An app routed around the remote tunnel resolves against the
+                // underlying network instead of the tunnel's resolver. The
+                // redirect is transparent: replies are rebuilt from the
+                // session's original addresses, so the app never sees it.
+                allowed = new Allowed(directDnsTarget, 53);
+            } else
+                allowed = new Allowed();
+
+        } finally {
+            // Read lock must always be released: a leaked read lock would
+            // permanently block every future writeLock() (all reloads).
+            lock.readLock().unlock();
+        }
+
+        if (prefs.getBoolean("log", false) || prefs.getBoolean("log_app", true))
+            if (packet.protocol != 6 /* TCP */ || !"".equals(packet.flags))
+                if (packet.uid != Process.myUid())
+                    logPacket(packet);
+
+        return allowed;
+    }
+
+    /**
+     * Check if tracking should be applied to this app (blocking/logging).
+     * Returns false if:
+     * - Monitoring (apply) is disabled for this app
+     * - Tracker Protection (tracker_protect) is disabled for this app
+     * - It's a system app and manage_system is disabled
+     */
+    private boolean shouldTrackApp(int uid) {
+        String packageName = uidToPackage.get(uid);
+        if (packageName == null) {
+            String[] packages;
+            try {
+                packages = getPackageManager().getPackagesForUid(uid);
+            } catch (SecurityException ex) {
+                // In work profiles, getPackagesForUid throws SecurityException for
+                // cross-user UIDs (requires INTERACT_ACROSS_USERS_FULL permission).
+                // Default to tracking so blocking/logging still works.
+                Log.w(TAG, "SecurityException in shouldTrackApp for uid " + uid + ": " + ex.getMessage());
+                return true;
+            }
+            if (packages == null || packages.length == 0) {
+                return true; // Unknown UID, default to tracking
+            }
+            packageName = packages[0];
+            uidToPackage.put(uid, packageName);
+        }
+
+        // Check if monitoring is enabled for this app. When monitoring is off the
+        // app is excluded from the VPN (addDisallowedApplication), but traffic from
+        // system daemons sharing this UID can still reach the tunnel, so no tracker
+        // access must be recorded for it either.
+        SharedPreferences applyPrefs = cachedApplyPrefs;
+        if (applyPrefs == null) {
+            applyPrefs = getSharedPreferences("apply", Context.MODE_PRIVATE);
+        }
+        if (!applyPrefs.getBoolean(packageName, true)) {
+            return false;
+        }
+
+        // Check if tracker protection is enabled for this app
+        SharedPreferences trackerProtectPrefs = cachedTrackerProtectPrefs;
+        if (trackerProtectPrefs == null) {
+            trackerProtectPrefs = getSharedPreferences("tracker_protect", Context.MODE_PRIVATE);
+        }
+        if (!BlockingMode.isTrackerProtectionEnabled(this, trackerProtectPrefs, packageName)) {
+            return false;
+        }
+
+        // Check if system app with manage_system disabled
+        if (!cachedManageSystem && Rule.isSystem(packageName, this)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean minimalOnlyApp(int uid) {
+        String packageName = uidToPackage.get(uid);
+        if (packageName == null)
+            return false;
+
+        SharedPreferences minimalOnlyPrefs = cachedMinimalOnlyPrefs;
+        if (minimalOnlyPrefs == null)
+            minimalOnlyPrefs = getSharedPreferences("tracker_essential", Context.MODE_PRIVATE);
+        // Shared-UID attribution deliberately follows shouldTrackApp: use the
+        // first package cached for the UID, inheriting that method's caveat.
+        return BlockingMode.isMinimalOnlyApp(this, minimalOnlyPrefs, packageName);
+    }
+
+    private boolean blockKnownTracker(String daddr, int uid) {
+        if (!shouldTrackApp(uid)) {
+            return false;
+        }
+
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        String blockingMode = TrackerList.getBlockingMode(this);
+        boolean blockAmbiguousTrackers = BlockingModeLogic.blocksAmbiguousTrackerIp(blockingMode);
+        Tracker tracker = null;
+        TrackerCache.Entry cached = trackerCache.get(daddr, System.currentTimeMillis());
+        if (cached != null)
+            tracker = cached.getTracker();
+
+        if (tracker == null) {
+            // Check if IP known
+            String dname = null;
+            // TODO: Note that this does not implement any SNI code
+            // Snapshot before the DB read: if dnsResolved() invalidates this
+            // IP's cache entry while we're mid-read below, our result may be
+            // stale (it could miss a row that raced us, or reflect a row
+            // that no longer applies). Comparing after the read lets us
+            // drop the put and let the next packet re-read instead of
+            // pinning a possibly-wrong verdict.
+            long generationBefore = trackerCache.generation();
+            // Retrieve dname from DB
+            DatabaseHelper dh = DatabaseHelper.getInstance(ServiceSinkhole.this);
+            long now = new Date().getTime();
+            // Expiry of the DNS record the chosen dname/tracker came from;
+            // -1 until we lock onto a tracker row, so a host-only result can
+            // fall back to the first candidate row's expiry instead.
+            long chosenTime = -1;
+            long chosenTtl = -1;
+            long firstTime = now;
+            long firstTtl = 7 * 24 * 3600 * 1000L;
+            boolean sawFirstRow = false;
+            boolean sawTrackerEvidence = false;
+            boolean sawNonTrackerEvidence = false;
+            long latestNonTrackerExpiry = -1;
+            // Blocking evidence, classified against the DuckDuckGo-only map.
+            // Detection above uses the full map in every mode, so the blocking
+            // verdict has to be tracked separately to stay DDG-compatible.
+            String minimalCategory = null;
+            boolean sawMinimalCategory = false;
+            boolean sawMinimalTrackerEvidence = false;
+            boolean sawNonMinimalTrackerEvidence = false;
+            long latestNonMinimalExpiry = -1;
+            // Expiry of the DNS record minimalCategory was derived from,
+            // tracked separately from chosenTime/chosenTtl: the DDG row that
+            // supplies minimalCategory need not be the same row that
+            // supplies the (broader-map) tracker, so the verdict must expire
+            // with its own evidence rather than an unrelated row's TTL.
+            long minimalChosenTime = -1;
+            long minimalChosenTtl = -1;
+            try (Cursor lookup = dh.getQAName(uid, daddr)) {
+                // Loop through all fresh DNS candidates for this IP and only fail closed
+                // when ambiguous tracker blocking is enabled or the evidence is tracker-only.
+                if (lookup != null) {
+                    DnsEvidence evidence = DnsEvidence.read(lookup);
+                    while (lookup.moveToNext()) {
+                        // Get DNS expiry details for this candidate row
+                        int colTime = lookup.getColumnIndex("time");
+                        int colTTL = lookup.getColumnIndex("ttl");
+                        long rowTime = lookup.isNull(colTime) ? now : lookup.getLong(colTime);
+                        long rowTtl = lookup.isNull(colTTL) ? firstTtl : lookup.getLong(colTTL);
+                        if (!sawFirstRow) {
+                            firstTime = rowTime;
+                            firstTtl = rowTtl;
+                            sawFirstRow = true;
+                        }
+
+                        // Check tracker
+                        String aname = lookup.getString(lookup.getColumnIndexOrThrow("aname"));
+                        String qname = lookup.getString(lookup.getColumnIndexOrThrow("qname"));
+                        String candidateDname = qname;
+                        Tracker candidateTracker = TrackerList.findTracker(qname);
+
+                        if (dname == null && qname != null)
+                            dname = qname;
+
+                        // If no tracker found, try DNS uncloaking
+                        if (candidateTracker == null
+                                && aname != null) {
+                            candidateTracker = TrackerList.findTracker(aname);
+
+                            if (candidateTracker != null) {
+                                candidateDname = aname;
+                                Log.d(TAG, "Uncloaked: " + qname + " -> " + aname);
+                            }
+                        }
+
+                        // Resolve the DDG verdict here, while both names are in
+                        // hand: a later lookup by the cached hostname alone would
+                        // miss a DDG match on an uncloaked CNAME target.
+                        Tracker candidateMinimal = qname == null
+                                ? null : TrackerList.findMinimalTracker(qname);
+                        if (candidateMinimal == null && aname != null)
+                            candidateMinimal = TrackerList.findMinimalTracker(aname);
+
+                        if (candidateMinimal != null) {
+                            sawMinimalTrackerEvidence = true;
+                            if (!sawMinimalCategory) {
+                                sawMinimalCategory = true;
+                                minimalCategory = candidateMinimal.category;
+                                minimalChosenTime = rowTime;
+                                minimalChosenTtl = rowTtl;
+                            }
+                        } else if (!evidence.minimalTrackerQuestions.contains(qname)
+                                && (qname != null || aname != null)) {
+                            latestNonMinimalExpiry = Math.max(latestNonMinimalExpiry,
+                                    TrackerEvidenceExpiry.at(rowTime, rowTtl));
+                            sawNonMinimalTrackerEvidence = true;
+                        }
+
+                        if (candidateTracker != null) {
+                            sawTrackerEvidence = true;
+                            if (tracker == null) {
+                                tracker = candidateTracker;
+                                dname = candidateDname;
+                                // Expire the cache entry with the DNS record
+                                // this tracker was derived from, not whatever
+                                // row happened to be read last.
+                                chosenTime = rowTime;
+                                chosenTtl = rowTtl;
+                            }
+                        } else if (!evidence.trackerQuestions.contains(qname)
+                                && (qname != null || aname != null)) {
+                            latestNonTrackerExpiry = Math.max(latestNonTrackerExpiry,
+                                    TrackerEvidenceExpiry.at(rowTime, rowTtl));
+                            sawNonTrackerEvidence = true;
+                        }
+                    }
+                }
+            }
+
+            boolean mixedTrackerEvidence = sawTrackerEvidence && sawNonTrackerEvidence
+                    && !blockAmbiguousTrackers;
+            if (mixedTrackerEvidence) {
+                Log.d(TAG, "Allowing mixed tracker evidence for " + daddr);
+                tracker = NO_TRACKER;
+            }
+
+            boolean mixedMinimalEvidence = sawMinimalTrackerEvidence && sawNonMinimalTrackerEvidence
+                    && !blockAmbiguousTrackers;
+            if (mixedMinimalEvidence)
+                minimalCategory = null;
+
+            // No success in finding dname or tracker?
+            if (dname == null)
+                dname = NO_DNAME;
+            if (tracker == null)
+                tracker = NO_TRACKER;
+
+            // Choose the cache expiry:
+            long expiry;
+            if (dname == NO_DNAME) {
+                // No DNS mapping was captured for this IP at all — the query
+                // may have gone over DoT, arrived before the service
+                // started, or been lost to a split TCP response. This is an
+                // unconfident miss: re-check soon rather than caching it for
+                // the full DNS TTL (up to 7 days), which would keep any
+                // tracker traffic to this IP invisible and unblocked until
+                // then.
+                expiry = TrackerEvidenceExpiry.at(now, NEGATIVE_TRACKER_CACHE_TTL_MS);
+            } else {
+                // DNS evidence exists (tracker or confident non-tracker);
+                // expire with the record the decision was derived from, not
+                // whatever row happened to be read last.
+                expiry = (chosenTime >= 0)
+                        ? TrackerEvidenceExpiry.at(chosenTime, chosenTtl)
+                        : TrackerEvidenceExpiry.at(firstTime, firstTtl);
+                // An ambiguous standard-mode verdict depends on both the
+                // selected tracker row and the last fresh non-tracker row.
+                // Re-read when either side can have changed, so a benign row
+                // expiring cannot leave an allow verdict cached until the
+                // tracker's unrelated TTL expires.
+                if (mixedTrackerEvidence)
+                    expiry = Math.min(expiry, TrackerEvidenceExpiry.mixed(
+                            TrackerEvidenceExpiry.at(chosenTime, chosenTtl),
+                            latestNonTrackerExpiry));
+                // The minimal (DDG) verdict can be derived from a
+                // different row than the broader-map tracker above; expire
+                // with whichever evidence goes stale first so a blocking
+                // verdict never outlives the record it came from.
+                if (minimalCategory != null && minimalChosenTime >= 0) {
+                    long minimalExpiry = TrackerEvidenceExpiry.at(
+                            minimalChosenTime, minimalChosenTtl);
+                    expiry = Math.min(expiry, minimalExpiry);
+                }
+                // A mixed Minimal/DDG verdict likewise depends on the selected
+                // DDG tracker and the last fresh non-DDG row.
+                if (mixedMinimalEvidence)
+                    expiry = Math.min(expiry, TrackerEvidenceExpiry.mixed(
+                            TrackerEvidenceExpiry.at(minimalChosenTime, minimalChosenTtl),
+                            latestNonMinimalExpiry));
+            }
+
+            // Save dname and tracker, but only if no concurrent
+            // dnsResolved() invalidated this IP's cache while we were
+            // reading the DB above — otherwise this put could pin a
+            // stale verdict that a racing insert already made obsolete.
+            // Skipping is cheap and correct: the next packet to this IP
+            // simply re-reads the DB.
+            TrackerCache.Entry cacheEntry = new TrackerCache.Entry(dname, tracker,
+                    minimalCategory, expiry);
+            trackerCache.putIfGeneration(daddr, cacheEntry, generationBefore);
+            // Keep the exact snapshot used for the decision for logging;
+            // the shared cache may be invalidated or replaced meanwhile.
+            cached = cacheEntry;
+
+            // Do not block based on IP-only tracker evidence.
+            // Shared IPs are too ambiguous without hostname evidence.
+        }
+
+        // Log or block?
+        if (prefs.getBoolean("log_logcat", false)) {
+            String app = uidToApp.get(uid);
+            if (app == null) {
+                PackageManager pm = getPackageManager();
+                app = Common.getAppName(pm, uid);
+                uidToApp.put(uid, app);
+            }
+            if (tracker != null) {
+                String host = (cached == null ? null : cached.getHostname());
+                Log.i("TC-Log", app + " " + daddr + " " + host + " " + tracker.getName());
+            }
+        } else {
+            if (tracker != null && tracker != NO_TRACKER) {
+                // Minimal mode and minimal-only apps share one verdict: block
+                // exactly the non-Content DuckDuckGo set, whatever else the
+                // broader detection map knows about this flow.
+                if (BlockingMode.MODE_MINIMAL.equals(blockingMode) || minimalOnlyApp(uid))
+                    return BlockingModeLogic.shouldBlockMinimalOnly(
+                            cached == null ? null : cached.getMinimalCategory());
+
+                TrackerBlocklist b = TrackerBlocklist.getInstance(ServiceSinkhole.this);
+                return b.blockedTracker(uid, tracker);
+            }
+        }
+
+        return false;
+    }
+
+    // Called from native code
+    private void accountUsage(Usage usage) {
+        logHandler.account(usage);
+    }
+
+    private BroadcastReceiver interactiveStateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(final Context context, final Intent intent) {
+            Log.i(TAG, "Received " + intent);
+            Util.logExtras(intent);
+
+            try {
+                executor.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            last_interactive = Intent.ACTION_SCREEN_ON.equals(intent.getAction());
+                            InteractiveStatePolicy.onScreenStateChanged(
+                                    last_interactive,
+                                    Util.isInteractive(ServiceSinkhole.this),
+                                    new InteractiveStatePolicy.Callbacks() {
+                                        @Override
+                                        public void onWireGuardInteractiveStateChanged(boolean interactive) {
+                                            updateWireGuardInteractiveState(interactive);
+                                        }
+
+                                        @Override
+                                        public void onStatsInteractiveStateChanged(boolean interactive) {
+                                            statsHandler.sendEmptyMessage(interactive ? MSG_STATS_START : MSG_STATS_STOP);
+                                        }
+                                    });
+
+                            // Screen state gates the DoH battery policy: while the
+                            // screen is off the proxy drops retries and idle
+                            // keep-alive sockets so a server-side reset during doze
+                            // can't wake the radio.
+                            net.kollnig.missioncontrol.dns.DnsProxyServer
+                                    .getInstance(ServiceSinkhole.this)
+                                    .onScreenStateChanged(last_interactive);
+
+                            if (last_interactive)
+                                recheckNetworkValidation();
+                        } catch (Throwable ex) {
+                            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                        }
+                    }
+                });
+            } catch (RejectedExecutionException ex) {
+                // Service is tearing down: the receiver can already be
+                // unregistered while this broadcast is still in-flight to the
+                // main Handler, racing executor.shutdownNow() in onDestroy().
+                Log.e(TAG, ex.toString());
+            }
+        }
+    };
+
+    private BroadcastReceiver userReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Log.i(TAG, "Received " + intent);
+            Util.logExtras(intent);
+
+            user_foreground = Intent.ACTION_USER_FOREGROUND.equals(intent.getAction());
+            Log.i(TAG, "User foreground=" + user_foreground + " user=" + (Process.myUid() / 100000));
+
+            if (user_foreground) {
+                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+                if (prefs.getBoolean("enabled", false)) {
+                    // Allow service of background user to stop
+                    try {
+                        Thread.sleep(3000);
+                    } catch (InterruptedException ignored) {
+                    }
+
+                    start("foreground", ServiceSinkhole.this);
+                }
+            } else
+                stop("background", ServiceSinkhole.this, true);
+        }
+    };
+
+    private BroadcastReceiver idleStateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Log.i(TAG, "Received " + intent);
+            Util.logExtras(intent);
+
+            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            boolean deviceIdleMode = pm.isDeviceIdleMode();
+            Log.i(TAG, "device idle=" + deviceIdleMode);
+
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+            IdleStatePolicy.onDeviceIdleModeChanged(
+                    deviceIdleMode,
+                    prefs.getBoolean("enabled", false) && vpn == null,
+                    Util.isInteractive(ServiceSinkhole.this),
+                    new IdleStatePolicy.Callbacks() {
+                        @Override
+                        public void onWireGuardInteractiveStateChanged(boolean interactive) {
+                            updateWireGuardInteractiveState(interactive);
+                        }
+
+                        @Override
+                        public void onReload() {
+                            // Only reached when the VPN died while the device was idle. A
+                            // reload on every Doze exit closed every native session, so
+                            // apps reconnected after each maintenance window for nothing.
+                            reload("idle state changed", ServiceSinkhole.this, false);
+                        }
+                    });
+        }
+    };
+
+    private BroadcastReceiver apStateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Log.i(TAG, "Received " + intent);
+            Util.logExtras(intent);
+            reload("AP state changed", ServiceSinkhole.this, false);
+        }
+    };
+
+    private BroadcastReceiver connectivityChangedReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            // Filter VPN connectivity changes
+            int networkType = intent.getIntExtra(ConnectivityManager.EXTRA_NETWORK_TYPE,
+                    ConnectivityManager.TYPE_DUMMY);
+            if (networkType == ConnectivityManager.TYPE_VPN)
+                return;
+
+            // Reload rules
+            Log.i(TAG, "Received " + intent);
+            Util.logExtras(intent);
+            reloadAfterNetworkChange(NetworkReloadPolicy.onConnectivityChanged());
+        }
+    };
+
+    ConnectivityManager.NetworkCallback networkMonitorCallback = new ConnectivityManager.NetworkCallback() {
+        private String TAG = "TrackerControl.Monitor";
+        private final Set<Network> validating = ConcurrentHashMap.newKeySet();
+
+        // https://android.googlesource.com/platform/frameworks/base/+/master/services/core/java/com/android/server/connectivity/NetworkMonitor.java
+
+        @Override
+        public void onAvailable(Network network) {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkInfo ni = cm.getNetworkInfo(network);
+            NetworkCapabilities capabilities = cm.getNetworkCapabilities(network);
+            Log.i(TAG, "Available network " + network + " " + ni);
+            Log.i(TAG, "Capabilities=" + capabilities);
+            checkConnectivity(network, ni, capabilities);
+        }
+
+        @Override
+        public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkInfo ni = cm.getNetworkInfo(network);
+            Log.i(TAG, "New capabilities network " + network + " " + ni);
+            Log.i(TAG, "Capabilities=" + capabilities);
+            checkConnectivity(network, ni, capabilities);
+        }
+
+        @Override
+        public void onLosing(Network network, int maxMsToLive) {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkInfo ni = cm.getNetworkInfo(network);
+            Log.i(TAG, "Losing network " + network + " within " + maxMsToLive + " ms " + ni);
+        }
+
+        @Override
+        public void onLost(Network network) {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkInfo ni = cm.getNetworkInfo(network);
+            Log.i(TAG, "Lost network " + network + " " + ni);
+
+            synchronized (mapValidated) {
+                mapValidated.remove(network);
+            }
+            mapValidateFailure.remove(network);
+        }
+
+        @Override
+        public void onUnavailable() {
+            Log.i(TAG, "No networks available");
+        }
+
+        private void checkConnectivity(Network network, NetworkInfo ni, NetworkCapabilities capabilities) {
+            if (isActiveNetwork(network) &&
+                    ni != null && capabilities != null &&
+                    ni.getDetailedState() != NetworkInfo.DetailedState.SUSPENDED &&
+                    ni.getDetailedState() != NetworkInfo.DetailedState.BLOCKED &&
+                    ni.getDetailedState() != NetworkInfo.DetailedState.DISCONNECTED &&
+                    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
+                    !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+
+                synchronized (mapValidated) {
+                    if (mapValidated.containsKey(network) &&
+                            mapValidated.get(network) + 20 * 1000 > new Date().getTime()) {
+                        Log.i(TAG, "Already validated " + network + " " + ni);
+                        return;
+                    }
+                }
+
+                long[] failure = mapValidateFailure.get(network);
+                if (failure != null) {
+                    long nowUptimeMs = SystemClock.elapsedRealtime();
+                    if (isValidationBackoffOpen(failure[0], failure[1], nowUptimeMs)) {
+                        Log.i(TAG, "Validation backoff open for " + network + " " + ni);
+                        return;
+                    }
+                    // The backoff window elapsed, so this would be a retry (a failure
+                    // entry only exists after at least one failed probe). The very
+                    // first probe of a network is never gated here, so a network first
+                    // seen during doze still gets validated; only repeated retries are
+                    // held back while non-interactive, and without advancing the
+                    // backoff, so a screen-off stretch doesn't itself lengthen it.
+                    if (!Util.isInteractive(ServiceSinkhole.this)) {
+                        Log.i(TAG, "Skipping validation retry while non-interactive " + network + " " + ni);
+                        return;
+                    }
+                }
+
+                if (!validating.add(network))
+                    return;
+
+                try {
+                    executor.submit(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+                                String host = prefs.getString("validate", "www.f-droid.org");
+                                Log.i(TAG, "Validating " + network + " " + ni + " host=" + host);
+
+                                synchronized (mapValidated) {
+                                    if (mapValidated.containsKey(network) &&
+                                            mapValidated.get(network) + 20 * 1000 > new Date().getTime()) {
+                                        Log.i(TAG, "Already validated " + network + " " + ni);
+                                        return;
+                                    }
+                                }
+
+                                Socket socket = null;
+                                try {
+                                    socket = network.getSocketFactory().createSocket();
+                                    socket.connect(new InetSocketAddress(host, 443), 10000);
+                                    Log.i(TAG, "Validated " + network + " " + ni + " host=" + host);
+                                    synchronized (mapValidated) {
+                                        mapValidated.put(network, new Date().getTime());
+                                    }
+                                    mapValidateFailure.remove(network);
+                                    ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+                                    cm.reportNetworkConnectivity(network, true);
+                                    Log.i(TAG, "Reported " + network + " " + ni);
+                                } catch (IOException ex) {
+                                    Log.e(TAG, ex.toString());
+                                    Log.i(TAG, "No connectivity " + network + " " + ni);
+                                    long[] previousFailure = mapValidateFailure.get(network);
+                                    long previousBackoffMs = previousFailure == null ? 0L : previousFailure[1];
+                                    mapValidateFailure.put(network, new long[]{
+                                            SystemClock.elapsedRealtime(),
+                                            nextValidationBackoffMs(previousBackoffMs)});
+                                } finally {
+                                    if (socket != null)
+                                        try {
+                                            socket.close();
+                                        } catch (IOException ex) {
+                                            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                                        }
+                                }
+                            } finally {
+                                validating.remove(network);
+                            }
+                        }
+                    });
+                } catch (RejectedExecutionException ex) {
+                    validating.remove(network);
+                    Log.e(TAG, ex.toString());
+                }
+            }
+        }
+    };
+
+    private BroadcastReceiver packageChangedReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(final Context context, final Intent intent) {
+            Log.i(TAG, "Received " + intent);
+            Util.logExtras(intent);
+
+            // Handle off the main thread: Rule.clearCache() synchronizes on the
+            // application context, a lock the command thread can hold for several
+            // seconds while building rules via slow PackageManager IPC. Doing this
+            // work on the main thread blocks input dispatching and causes an ANR.
+            final BroadcastReceiver.PendingResult result = goAsync();
+            try {
+                executor.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            handlePackageChanged(context, intent);
+                        } catch (Throwable ex) {
+                            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+                        } finally {
+                            result.finish();
+                        }
+                    }
+                });
+            } catch (RejectedExecutionException ex) {
+                // Service is tearing down: the receiver can already be
+                // unregistered while this broadcast is still in-flight to the
+                // main Handler, racing executor.shutdownNow() in onDestroy().
+                Log.e(TAG, ex.toString());
+                result.finish();
+            }
+        }
+    };
+
+    private void handlePackageChanged(Context context, Intent intent) {
+        if (Intent.ACTION_PACKAGE_ADDED.equals(intent.getAction())) {
+            // Application added
+            Rule.clearCache(context);
+
+            InternetBlocklist internetBlocklist = InternetBlocklist.getInstance(context);
+            TrackerBlocklist b = TrackerBlocklist.getInstance(context);
+            boolean internetChanged = false;
+            boolean trackerChanged = false;
+
+            // A replaced package was already installed, so it resolved at load
+            // time and its uid does not change on update. Only a genuinely new
+            // install can claim a pending entry.
+            if (!intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) {
+                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+                int uid = intent.getIntExtra(Intent.EXTRA_UID, -1);
+
+                // Resolve only the package this broadcast is about. Sweeping
+                // every pending entry would cost a PackageManager call each,
+                // on every install, for entries that may never resolve — this
+                // runs on the service's main thread with the screen off.
+                String packageName = (intent.getData() == null
+                        ? null : intent.getData().getSchemeSpecificPart());
+                internetChanged = internetBlocklist.resolvePendingPackage(context, packageName);
+                trackerChanged = b.resolvePendingPackage(context, packageName);
+
+                if (uid > -1) {
+                    // Set tracker defaults based on blocking mode
+                    trackerChanged |= b.ensureDefaults(uid, BlockingMode.isStrictMode(context));
+
+                    // Show install notification
+                    if (prefs.getBoolean("installed", true))
+                        notifyNewApplication(uid, true);
+                }
+            }
+
+            if (trackerChanged)
+                b.saveSettings(context);
+            if (internetChanged)
+                internetBlocklist.saveSettings(context);
+
+            reload("package added", context, false);
+
+        } else if (Intent.ACTION_PACKAGE_REMOVED.equals(intent.getAction())) {
+            // Application removed
+            Rule.clearCache(context);
+
+            if (intent.getBooleanExtra(Intent.EXTRA_DATA_REMOVED, false)) {
+                // Remove settings
+                String packageName = intent.getData().getSchemeSpecificPart();
+                Log.i(TAG, "Deleting settings package=" + packageName);
+                context.getSharedPreferences("apply", Context.MODE_PRIVATE).edit().remove(packageName).apply();
+                BlockingMode.clearAutoExcludedApp(context, packageName);
+                context.getSharedPreferences("tracker_protect", Context.MODE_PRIVATE).edit().remove(packageName).apply();
+                context.getSharedPreferences(Rule.PREF_WG_ROUTE, Context.MODE_PRIVATE).edit().remove(packageName).apply();
+                context.getSharedPreferences("notify", Context.MODE_PRIVATE).edit().remove(packageName).apply();
+
+                // EXTRA_DATA_REMOVED is false for the PACKAGE_REMOVED an update
+                // sends, so the analysis cache survives updates as intended and
+                // is dropped only when the app is really gone.
+                TrackerAnalysisManager.clearCache(context, packageName);
+
+                int uid = intent.getIntExtra(Intent.EXTRA_UID, 0);
+                if (uid > 0) {
+                    // The internet block is keyed by UID, not by package, so it
+                    // may still be in use by another package of a shared UID.
+                    // Drop it only once the UID has no package left, otherwise a
+                    // reinstall silently comes back with its Internet blocked.
+                    // A SecurityException (other user/profile on Android 16+)
+                    // means "unknown", which must not be read as "none left".
+                    try {
+                        String[] remaining = context.getPackageManager().getPackagesForUid(uid);
+                        if (remaining == null || remaining.length == 0) {
+                            InternetBlocklist internetBlocklist = InternetBlocklist.getInstance(context);
+                            if (internetBlocklist.blockedInternet(uid))
+                                internetBlocklist.unblock(context, uid);
+
+                            DatabaseHelper dh = DatabaseHelper.getInstance(context);
+                            dh.clearLog(uid);
+                            dh.clearAccess(uid, false);
+                            uidToApp.remove(uid);
+                            uidToPackage.remove(uid);
+
+                            NotificationManagerCompat.from(context).cancel(uid); // installed notification
+                            NotificationManagerCompat.from(context).cancel(uid + 10000); // access notification
+                        }
+                    } catch (SecurityException ex) {
+                        Log.w(TAG, "Keeping internet block uid=" + uid + ": " + ex.getMessage());
+                    }
+                }
+            }
+
+            reload("package deleted", context, false);
+
+        } else if (Intent.ACTION_EXTERNAL_APPLICATIONS_AVAILABLE.equals(intent.getAction())) {
+            // Apps on external or adopted storage become visible only once the
+            // volume mounts, which on boot is after this service has built its
+            // rules. Without a reload they stay unknown to the VPN, and so
+            // without network access, until the app list is refreshed.
+            Rule.clearCache(context);
+
+            // Settings saved for these apps could not be resolved to a UID
+            // while the volume was missing, so resolve them now.
+            String[] packages = intent.getStringArrayExtra(Intent.EXTRA_CHANGED_PACKAGE_LIST);
+            if (packages != null) {
+                InternetBlocklist internetBlocklist = InternetBlocklist.getInstance(context);
+                TrackerBlocklist b = TrackerBlocklist.getInstance(context);
+                boolean internetChanged = false;
+                boolean trackerChanged = false;
+                for (String packageName : packages) {
+                    internetChanged |= internetBlocklist.resolvePendingPackage(context, packageName);
+                    trackerChanged |= b.resolvePendingPackage(context, packageName);
+                }
+                if (trackerChanged)
+                    b.saveSettings(context);
+                if (internetChanged)
+                    internetBlocklist.saveSettings(context);
+            }
+
+            reload("external applications available", context, false);
+
+        } else if (Intent.ACTION_EXTERNAL_APPLICATIONS_UNAVAILABLE.equals(intent.getAction())) {
+            // The volume went away, but the apps are still installed: keep
+            // their settings and only rebuild the rules.
+            Rule.clearCache(context);
+            reload("external applications unavailable", context, false);
+        }
+    }
+
+    public void notifyNewApplication(int uid, boolean checkTrackerLibraries) {
+        if (uid < 0 || !Util.hasInternet(uid, this))
+            return;
+        if (uid == Process.myUid())
+            return;
+
+        try {
+            // Get application name
+            List<String> names = Util.getApplicationNames(uid, this);
+            String name = (names.size() == 0 ? Integer.toString(uid) : TextUtils.join(", ", names));
+
+            // Get application info
+            PackageManager pm = getPackageManager();
+            String[] packages = Util.getPackagesForUid(pm, uid);
+            if (packages == null || packages.length < 1)
+                throw new PackageManager.NameNotFoundException(Integer.toString(uid));
+            boolean internet = Util.hasInternet(uid, this);
+            final String packageName = packages[0];
+
+            // Build notification
+            Intent main = new Intent(this, DetailsActivity.class);
+            main.putExtra(INTENT_EXTRA_APP_NAME, name);
+            main.putExtra(INTENT_EXTRA_APP_PACKAGENAME, packageName);
+            main.putExtra(INTENT_EXTRA_APP_UID, uid);
+            PendingIntent pi = PendingIntentCompat.getActivity(this, 0, main, PendingIntent.FLAG_UPDATE_CURRENT);
+
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "notify");
+            builder.setSmallIcon(R.drawable.ic_rocket_white)
+                    .setContentIntent(pi)
+                    .addAction(0, getString(R.string.title_activity_detail), pi)
+                    .setColor(getResources().getColor(R.color.colorTrackerControl))
+                    .setAutoCancel(true);
+            builder.setContentTitle(getString(R.string.msg_installed, name))
+                    .setContentText(getString(R.string.msg_installed_description));
+
+            // Add uninstall action
+            Intent intent = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.parse("package:" + packageName));
+            PendingIntent piUninstall = PendingIntentCompat.getActivity(this, 0, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT);
+            builder.addAction(0, getString(R.string.uninstall), piUninstall);
+
+            builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+                    .setVisibility(NotificationCompat.VISIBILITY_SECRET);
+
+            // Show notification
+            if (internet) {
+                if (Util.canNotify(this))
+                    NotificationManagerCompat.from(this).notify(uid, builder.build());
+
+                // Check tracker libraries in app
+                if (checkTrackerLibraries)
+                    checkTrackers(packageName, uid, name, builder);
+            }
+
+        } catch (PackageManager.NameNotFoundException ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        } catch (SecurityException ex) {
+            // Work profile cross-user UID
+            Log.w(TAG, "SecurityException showing install notification for uid " + uid + ": " + ex.getMessage());
+        }
+    }
+
+    // Callers must invoke this off the main thread (e.g. the package receiver's
+    // executor or the command handler thread), as it performs blocking work.
+    private void checkTrackers(String packageName, int uid, String appName,
+            NotificationCompat.Builder builder) {
+        try {
+            Context c = getApplicationContext();
+            TrackerAnalysisManager manager = TrackerAnalysisManager.getInstance(c);
+
+            // Check cache first
+            String cachedResult = manager.getCachedResult(packageName);
+            if (cachedResult != null && !manager.isCacheStale(packageName)) {
+                // Use cached result
+                int trackerCount = TrackerAnalysisManager.countTrackers(cachedResult);
+                builder.setContentText(getString(R.string.msg_installed_tracker_libraries_found, trackerCount));
+                NotificationManagerCompat.from(c).notify(uid, builder.build());
+            } else {
+                // Schedule analysis for later; the worker updates this notification when done.
+                manager.startAnalysis(packageName, uid, appName);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void onCreate() {
+        destroying = false;
+        Log.i(TAG, "Create version=" + Util.getSelfVersionName(this) + "/" + Util.getSelfVersionCode(this));
+        try {
+            startForeground(NOTIFY_WAITING, getWaitingNotification());
+        } catch (Exception ex) {
+            Log.e(TAG, "Failed to start foreground service", ex);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    ex instanceof android.app.ForegroundServiceStartNotAllowedException) {
+                stopSelf();
+                return;
+            }
+            throw ex;
+        }
+
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+
+        if (jni_context != 0) {
+            Log.w(TAG, "Create with context=" + jni_context);
+            jni_stop(jni_context);
+            synchronized (jni_lock) {
+                jni_done(jni_context);
+                jni_context = 0;
+            }
+        }
+
+        // Native init
+        jni_context = jni_init(Build.VERSION.SDK_INT);
+        Log.i(TAG, "Created context=" + jni_context);
+        boolean pcap = prefs.getBoolean("pcap", false);
+        setPcap(pcap, this);
+
+        Util.setTheme(this);
+        super.onCreate();
+
+        HandlerThread commandThread = new HandlerThread(getString(R.string.app_name) + " command",
+                Process.THREAD_PRIORITY_FOREGROUND);
+        HandlerThread logThread = new HandlerThread(getString(R.string.app_name) + " log",
+                Process.THREAD_PRIORITY_BACKGROUND);
+        HandlerThread statsThread = new HandlerThread(getString(R.string.app_name) + " stats",
+                Process.THREAD_PRIORITY_BACKGROUND);
+        commandThread.start();
+        logThread.start();
+        statsThread.start();
+
+        commandLooper = commandThread.getLooper();
+        logLooper = logThread.getLooper();
+        statsLooper = statsThread.getLooper();
+
+        commandHandler = new CommandHandler(commandLooper);
+        logHandler = new LogHandler(logLooper);
+        statsHandler = new StatsHandler(statsLooper);
+        prefs.registerOnSharedPreferenceChangeListener(privateDnsPreferenceListener);
+
+        net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.addStateListener(wgStateListener);
+
+        // Listen for user switches
+        IntentFilter ifUser = new IntentFilter();
+        ifUser.addAction(Intent.ACTION_USER_BACKGROUND);
+        ifUser.addAction(Intent.ACTION_USER_FOREGROUND);
+        ContextCompat.registerReceiver(this, userReceiver, ifUser, ContextCompat.RECEIVER_NOT_EXPORTED);
+        registeredUser = true;
+
+        // Listen for idle mode state changes
+        IntentFilter ifIdle = new IntentFilter();
+        ifIdle.addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED);
+        ContextCompat.registerReceiver(this, idleStateReceiver, ifIdle, ContextCompat.RECEIVER_NOT_EXPORTED);
+        registeredIdleState = true;
+
+        IntentFilter ifAp = new IntentFilter();
+        ifAp.addAction("android.net.wifi.WIFI_AP_STATE_CHANGED");
+        ContextCompat.registerReceiver(this, apStateReceiver, ifAp, ContextCompat.RECEIVER_NOT_EXPORTED);
+        registeredApState = true;
+
+        // Listen for added/removed applications
+        IntentFilter ifPackage = new IntentFilter();
+        ifPackage.addAction(Intent.ACTION_PACKAGE_ADDED);
+        ifPackage.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        ifPackage.addDataScheme("package");
+        ContextCompat.registerReceiver(this, packageChangedReceiver, ifPackage, ContextCompat.RECEIVER_NOT_EXPORTED);
+
+        // Apps on external or adopted storage being mounted or unmounted. These
+        // broadcasts carry no data URI, so they need a filter without a scheme.
+        IntentFilter ifExternal = new IntentFilter();
+        ifExternal.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_AVAILABLE);
+        ifExternal.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_UNAVAILABLE);
+        ContextCompat.registerReceiver(this, packageChangedReceiver, ifExternal, ContextCompat.RECEIVER_NOT_EXPORTED);
+        registeredPackageChanged = true;
+
+        try {
+            listenNetworkChanges();
+        } catch (Throwable ex) {
+            Log.w(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+            listenConnectivityChanges();
+        }
+
+        // Monitor networks
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        cm.registerNetworkCallback(
+                new NetworkRequest.Builder()
+                        .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(),
+                networkMonitorCallback);
+
+        // Setup house holding
+        Intent alarmIntent = new Intent(this, ServiceSinkhole.class);
+        alarmIntent.setAction(ACTION_HOUSE_HOLDING);
+        PendingIntent pi;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            pi = PendingIntentCompat.getForegroundService(this, 0, alarmIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        else
+            pi = PendingIntentCompat.getService(this, 0, alarmIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        am.setInexactRepeating(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + 60 * 1000,
+                AlarmManager.INTERVAL_HALF_DAY, pi);
+
+        // Marks that onCreate ran to completion; onDestroy uses this to decide
+        // which teardown steps are safe to run. Must stay the last statement.
+        initialized = true;
+    }
+
+    private void listenNetworkChanges() {
+        // Listen for network changes
+        Log.i(TAG, "Starting listening to network changes");
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkRequest.Builder builder = new NetworkRequest.Builder();
+        builder.addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        builder.addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+
+        ConnectivityManager.NetworkCallback nc = new ConnectivityManager.NetworkCallback() {
+            private Network last_active = null;
+            private Network last_network = null;
+            private Boolean last_connected = null;
+            private Boolean last_metered = null;
+            private List<InetAddress> last_dns = null;
+            private String last_private_dns = null;
+
+            @Override
+            public void onAvailable(Network network) {
+                Log.i(TAG, "Available network=" + network);
+                if (!isActiveNetwork(network))
+                    return;
+
+                last_active = network;
+                last_network = network;
+                last_connected = Util.isConnected(ServiceSinkhole.this);
+                last_metered = Util.isMeteredNetwork(ServiceSinkhole.this);
+                reloadAfterNetworkChange(NetworkReloadPolicy.onNetworkAvailable());
+            }
+
+            @Override
+            public void onLinkPropertiesChanged(Network network, LinkProperties linkProperties) {
+                Log.i(TAG, "Changed properties=" + network + " props=" + linkProperties);
+                if (!isActiveNetwork(network))
+                    return;
+
+                // Make sure the right DNS servers are being used
+                List<InetAddress> dns = linkProperties.getDnsServers();
+                // Non-null only when Private DNS is pinned to a hostname, which
+                // leaves the resolver list untouched — so this is the only part
+                // of the properties that reveals the change.
+                String private_dns = (Build.VERSION.SDK_INT < Build.VERSION_CODES.P
+                        ? null : linkProperties.getPrivateDnsServerName());
+                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+                String reason = NetworkReloadPolicy.onLinkPropertiesChanged(
+                        last_dns,
+                        dns,
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O,
+                        prefs.getBoolean("reload_onconnectivity", false),
+                        last_private_dns,
+                        private_dns);
+                if (reason != null) {
+                    Log.i(TAG, "Changed link properties=" + linkProperties +
+                            "DNS cur=" + TextUtils.join(",", dns) +
+                            "DNS prv=" + (last_dns == null ? null : TextUtils.join(",", last_dns)) +
+                            " private DNS cur=" + private_dns + " prv=" + last_private_dns);
+                    last_dns = dns;
+                    last_private_dns = private_dns;
+                    reloadAfterNetworkChange(reason);
+                }
+                if (vpn != null)
+                    requestPrivateDnsWarningUpdate();
+            }
+
+            @Override
+            public void onCapabilitiesChanged(Network network, NetworkCapabilities networkCapabilities) {
+                Log.i(TAG, "Changed capabilities=" + network + " caps=" + networkCapabilities);
+                if (!isActiveNetwork(network))
+                    return;
+
+                boolean connected = Util.isConnected(ServiceSinkhole.this);
+                boolean metered = Util.isMeteredNetwork(ServiceSinkhole.this);
+                Log.i(TAG, "Connected=" + connected + "/" + last_connected +
+                        " metered=" + metered + "/" + last_metered);
+
+                String reason = NetworkReloadPolicy.onCapabilitiesChanged(
+                        network, last_network,
+                        last_connected, connected,
+                        last_metered, metered);
+
+                if (reason != null)
+                    reloadAfterNetworkChange(reason);
+
+                last_network = network;
+                last_connected = connected;
+                last_metered = metered;
+            }
+
+            @Override
+            public void onLost(Network network) {
+                Log.i(TAG, "Lost network=" + network + " active=" + isActiveNetwork(network));
+                if (last_active == null || !last_active.equals(network))
+                    return;
+
+                String reason = NetworkReloadPolicy.onNetworkLost(network, last_active);
+                last_active = null;
+                last_connected = Util.isConnected(ServiceSinkhole.this);
+                if (reason != null)
+                    reloadAfterNetworkChange(reason);
+            }
+        };
+        cm.registerNetworkCallback(builder.build(), nc);
+        networkCallback = nc;
+    }
+
+    // Network flapping (Wi-Fi<->cellular handoffs, DHCP renewals) fires several
+    // ConnectivityManager callbacks within milliseconds of each other. Each
+    // reload is a foreground-service update + wakelock + native VPN restart +
+    // WireGuard rebind, so bursts are coalesced into a single reload using the
+    // last reason once the burst settles. Not every reason needs the rebind, so
+    // the need for one is accumulated across the burst rather than read off the
+    // surviving reason: a reason that does not need it must not cancel one that
+    // did, or the tunnel keeps a socket bound to a network that is gone.
+    private static final long NETWORK_RELOAD_DEBOUNCE_MS = 1500L;
+    private static final Object NETWORK_RELOAD_TOKEN = new Object();
+    private final Handler networkReloadDebounceHandler = new Handler(Looper.getMainLooper());
+    private final AtomicBoolean pendingWireGuardRestart = new AtomicBoolean(false);
+
+    private void reloadAfterNetworkChange(final String reason) {
+        // Callbacks arrive off the main thread; the reload runs on it.
+        cancelVpnReplacementRecovery(false);
+        if (NetworkReloadPolicy.shouldRestartWireGuard(reason))
+            pendingWireGuardRestart.set(true);
+        networkReloadDebounceHandler.removeCallbacksAndMessages(NETWORK_RELOAD_TOKEN);
+        networkReloadDebounceHandler.postAtTime(new Runnable() {
+            @Override
+            public void run() {
+                if (pendingWireGuardRestart.getAndSet(false))
+                    net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.onUnderlyingNetworkChanged();
+                reload(reason, ServiceSinkhole.this, false);
+            }
+        }, NETWORK_RELOAD_TOKEN, SystemClock.uptimeMillis() + NETWORK_RELOAD_DEBOUNCE_MS);
+    }
+
+    private void listenConnectivityChanges() {
+        // Listen for connectivity updates
+        Log.i(TAG, "Starting listening to connectivity changes");
+        IntentFilter ifConnectivity = new IntentFilter();
+        ifConnectivity.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
+        ContextCompat.registerReceiver(this, connectivityChangedReceiver, ifConnectivity,
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+        registeredConnectivityChanged = true;
+
+    }
+
+    private Network getActiveNetwork() {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null)
+            return null;
+
+        Network active = cm.getActiveNetwork();
+        if (active == null) {
+            Log.i(TAG, "getActiveNetwork: no active network");
+            return null;
+        }
+
+        NetworkCapabilities activeCapabilities = cm.getNetworkCapabilities(active);
+        if (activeCapabilities != null && activeCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN))
+            return active;
+        else
+            Log.w(TAG, "getActiveNetwork: active network is VPN");
+
+        NetworkInfo ani = cm.getActiveNetworkInfo();
+        if (ani == null)
+            return null;
+
+        Network[] networks = cm.getAllNetworks();
+        for (Network network : networks) {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+            Log.i(TAG, "getActiveNetwork: network=" + network + " caps=" + caps);
+            if (caps == null || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN))
+                continue;
+
+            NetworkInfo ni = cm.getNetworkInfo(network);
+            if (ni == null)
+                continue;
+            if (ni.getType() == ani.getType() &&
+                    ni.getSubtype() == ani.getSubtype()) {
+                Log.i(TAG, "getActiveNetwork: returning network=" + network);
+                return network;
+            }
+        }
+
+        Log.i(TAG, "getActiveNetwork: no active network found");
+        return null;
+    }
+
+    private boolean isActiveNetwork(Network network) {
+        return (network != null && network.equals(getActiveNetwork()));
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        if (state == State.enforcing)
+            startForeground(NOTIFY_ENFORCING, getEnforcingNotification(-1, -1, -1));
+        else
+            startForeground(NOTIFY_WAITING, getWaitingNotification());
+
+        Log.i(TAG, "Received " + intent);
+        Util.logExtras(intent);
+
+        // Check for set command
+        if (intent != null && intent.hasExtra(EXTRA_COMMAND) &&
+                intent.getSerializableExtra(EXTRA_COMMAND) == Command.set) {
+            set(intent);
+            return START_STICKY;
+        }
+
+        // Keep awake (bounded: see WAKELOCK_TIMEOUT_MS)
+        getLock(this).acquire(WAKELOCK_TIMEOUT_MS);
+
+        // Get state
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        boolean enabled = prefs.getBoolean("enabled", false);
+
+        // Handle service restart
+        if (intent == null) {
+            Log.i(TAG, "Restart");
+
+            // Recreate intent
+            intent = new Intent(this, ServiceSinkhole.class);
+            intent.putExtra(EXTRA_COMMAND, enabled ? Command.start : Command.stop);
+        }
+
+        if (ACTION_HOUSE_HOLDING.equals(intent.getAction()))
+            intent.putExtra(EXTRA_COMMAND, Command.householding);
+        Command cmd = (Command) intent.getSerializableExtra(EXTRA_COMMAND);
+        if (cmd == null)
+            intent.putExtra(EXTRA_COMMAND, enabled ? Command.start : Command.stop);
+        String reason = intent.getStringExtra(EXTRA_REASON);
+        Log.i(TAG, "Start intent=" + intent + " command=" + cmd + " reason=" + reason +
+                " vpn=" + (vpn != null) + " user=" + (Process.myUid() / 100000));
+
+        if (commandHandler != null)
+            commandHandler.queue(intent);
+
+        return START_STICKY;
+    }
+
+    private void set(Intent intent) {
+        // Get arguments
+        int uid = intent.getIntExtra(EXTRA_UID, 0);
+        String network = intent.getStringExtra(EXTRA_NETWORK);
+        String pkg = intent.getStringExtra(EXTRA_PACKAGE);
+        boolean blocked = intent.getBooleanExtra(EXTRA_BLOCKED, false);
+        Log.i(TAG, "Set " + pkg + " " + network + "=" + blocked);
+
+        Log.i(TAG, "Ignoring legacy network access rule");
+
+        // Apply rules
+        ServiceSinkhole.reload("notification", ServiceSinkhole.this, false);
+
+        // Update notification
+        notifyNewApplication(uid, false);
+
+        // Update UI
+        Intent ruleset = new Intent(ActivityMain.ACTION_RULES_CHANGED);
+        LocalBroadcastManager.getInstance(ServiceSinkhole.this).sendBroadcast(ruleset);
+    }
+
+    @Override
+    public void onRevoke() {
+        Log.i(TAG, "Revoke");
+        cancelWireGuardStartupRecovery(true);
+        cancelVpnReplacementRecovery(false);
+
+        // Preserve the enabled state only while Android still designates us as
+        // the always-on VPN. In that case a transient system teardown should be
+        // recoverable. A deliberate revoke in system settings, or another VPN
+        // taking the slot, clears the always-on designation and must disable TC;
+        // otherwise the repeating watchdog would keep trying to reclaim the VPN.
+        //
+        // Correctness in both directions depends on the OS reporting the
+        // always-on designation correctly at revoke time. On pre-Q devices the
+        // hidden setting may be unavailable, so unknown is biased toward keeping
+        // the existing state; only a positively-known false disables TC.
+        Boolean alwaysOn = null;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                alwaysOn = isAlwaysOn();
+            else {
+                String alwaysOnPackage = Settings.Secure.getString(
+                        getContentResolver(), "always_on_vpn_app");
+                alwaysOn = (alwaysOnPackage == null) ? null : getPackageName().equals(alwaysOnPackage);
+            }
+        } catch (Throwable ex) {
+            Log.w(TAG, "Could not determine always-on VPN state", ex);
+        }
+
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        boolean enabled = resolveEnabledAfterRevoke(prefs.getBoolean("enabled", false), alwaysOn);
+        prefs.edit().putBoolean("enabled", enabled).apply();
+        Log.i(TAG, "Revoke always-on=" + alwaysOn + " enabled=" + enabled);
+
+        // A revoke is the system telling us the tunnel is gone on purpose, so
+        // it is recorded like any other deliberate teardown and the restart
+        // worker leaves it alone. Coming back from one is the OS's job, through
+        // the always-on designation it either kept or cleared above.
+        vpnEstablished = false;
+        markStoppedCleanly(true);
+
+        // Feedback: the tunnel really did drop, so inform the user (mirrors
+        // Android's own "VPN disconnected" notice). This does not disable TC.
+        showDisabledNotification();
+        WidgetMain.updateWidgets(this);
+
+        super.onRevoke();
+    }
+
+    static boolean isVpnEstablished() {
+        return vpnEstablished;
+    }
+
+    /**
+     * Whether the last teardown was one the service carried out itself. A kill
+     * records nothing, so the flag still reads false afterwards, and that is
+     * what {@link VpnRestartWorker} restarts on.
+     */
+    static boolean wasStoppedCleanly(Context context) {
+        return PreferenceManager.getDefaultSharedPreferences(context)
+                .getBoolean(PREF_STOPPED_CLEANLY, false);
+    }
+
+    private void markStoppedCleanly(boolean stopped) {
+        PreferenceManager.getDefaultSharedPreferences(this).edit()
+                .putBoolean(PREF_STOPPED_CLEANLY, stopped).apply();
+    }
+
+    static boolean resolveEnabledAfterRevoke(boolean enabled, Boolean alwaysOn) {
+        if (alwaysOn == null)
+            return enabled;
+        return enabled && alwaysOn;
+    }
+
+    @Override
+    public void onDestroy() {
+        synchronized (this) {
+            destroying = true;
+            Log.i(TAG, "Destroy");
+
+            // Flush any pending batched writes before shutdown
+            DatabaseHelper dh = DatabaseHelper.getInstance(ServiceSinkhole.this);
+            if (dh != null) {
+                dh.flushLogBatch();
+                dh.flushAccessBatch();
+                dh.flushUsageBatch();
+            }
+
+            // Cancel any debounced network-change reload so it doesn't fire post-teardown
+            networkReloadDebounceHandler.removeCallbacksAndMessages(NETWORK_RELOAD_TOKEN);
+            privateDnsWarningExpiryHandler.removeCallbacks(privateDnsWarningExpiryRunnable);
+            PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this)
+                    .unregisterOnSharedPreferenceChangeListener(privateDnsPreferenceListener);
+            cancelNativeRecovery(true);
+            cancelWireGuardStartupRecovery(true);
+            cancelVpnReplacementRecovery(true);
+
+            // onCreate can stopSelf() before creating the handler threads when
+            // startForeground is denied (Android 12+); there is nothing to quit
+            if (initialized) {
+                commandLooper.quit();
+                logLooper.quit();
+                statsLooper.quit();
+
+                for (Command command : Command.values())
+                    commandHandler.removeMessages(command.ordinal());
+            }
+            releaseLock(this);
+
+            // Registered in command loop
+            if (registeredInteractiveState) {
+                unregisterReceiver(interactiveStateReceiver);
+                registeredInteractiveState = false;
+            }
+            if (callStateListener != null) {
+                TelephonyManager tm = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+                tm.listen(callStateListener, PhoneStateListener.LISTEN_NONE);
+                callStateListener = null;
+            }
+
+            // Register in onCreate
+            if (registeredUser) {
+                unregisterReceiver(userReceiver);
+                registeredUser = false;
+            }
+            if (registeredIdleState) {
+                unregisterReceiver(idleStateReceiver);
+                registeredIdleState = false;
+            }
+            if (registeredApState) {
+                unregisterReceiver(apStateReceiver);
+                registeredApState = false;
+            }
+            if (registeredPackageChanged) {
+                unregisterReceiver(packageChangedReceiver);
+                registeredPackageChanged = false;
+            }
+
+            if (networkCallback != null) {
+                unlistenNetworkChanges();
+                networkCallback = null;
+            }
+            if (registeredConnectivityChanged) {
+                unregisterReceiver(connectivityChangedReceiver);
+                registeredConnectivityChanged = false;
+            }
+
+            net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.removeStateListener(wgStateListener);
+
+            // Registered at the end of onCreate, right after jni_init(); never
+            // registered (and jni_context never set) if onCreate bailed early.
+            if (initialized) {
+                ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+                cm.unregisterNetworkCallback(networkMonitorCallback);
+            }
+
+            try {
+                if (vpn != null) {
+                    stopNative(vpn);
+                    stopVPN(vpn);
+                    vpn = null;
+                    // Deliberately not marked as a clean stop: a service the
+                    // system takes down is exactly what the restart worker is
+                    // for, and a stop the service meant has already marked it.
+                    vpnEstablished = false;
+                    unprepare();
+                }
+            } catch (Throwable ex) {
+                Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+            }
+
+            // Final teardown of the egress side, mirroring CommandHandler.stop().
+            // Only that command path used to do this, so a destroy that did not
+            // come through it — a system revoke (onRevoke -> stopSelf), or
+            // stopService — left the Rust tunnel, its duplicated descriptors,
+            // the connectivity monitor and callbacks capturing this now-dead
+            // service alive until some later start replaced them. Both stops
+            // are idempotent, and both must precede jni_done() below.
+            try {
+                net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.stop(
+                        () -> { jni_wireguard_stop(); return kotlin.Unit.INSTANCE; });
+                jni_wireguard_required(false);
+                net.kollnig.missioncontrol.dns.DnsProxyServer.getInstance(ServiceSinkhole.this).stop();
+            } catch (Throwable ex) {
+                Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+            }
+
+            if (initialized) {
+                Log.i(TAG, "Destroy context=" + jni_context);
+                synchronized (jni_lock) {
+                    jni_done(jni_context);
+                    jni_context = 0;
+                }
+            }
+        }
+
+        executor.shutdownNow();
+
+        super.onDestroy();
+    }
+
+    private void unlistenNetworkChanges() {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        cm.unregisterNetworkCallback((ConnectivityManager.NetworkCallback) networkCallback);
+    }
+
+    private Notification getEnforcingNotification(int allowed, int blocked, int hosts) {
+        Intent main = new Intent(this, ActivityMain.class);
+        PendingIntent pi = PendingIntentCompat.getActivity(this, 0, main, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        Intent i = new Intent(INTENT_PAUSE);
+        i.setPackage(this.getPackageName());
+        PendingIntent pauseIntent = PendingIntentCompat.getBroadcast(this, 0, i, PendingIntent.FLAG_UPDATE_CURRENT);
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ServiceSinkhole.this);
+        int pause = getIntPref(prefs, "pause", 10);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "foreground");
+        builder.setSmallIcon(R.drawable.ic_rocket_white)
+                .setContentIntent(pi)
+                .setColor(getResources().getColor(R.color.colorTrackerControl))
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .addAction(R.drawable.ic_pause_white_24dp, getResources().getQuantityString(
+                        R.plurals.pause, pause, pause), pauseIntent);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
+            builder.setContentTitle(getString(R.string.msg_started));
+        else
+            builder.setContentTitle(getString(R.string.app_name))
+                    .setContentText(getString(R.string.msg_started));
+
+        builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+                .setPriority(NotificationCompat.PRIORITY_MIN);
+
+        if (allowed >= 0)
+            last_allowed = allowed;
+        else
+            allowed = last_allowed;
+        if (blocked >= 0)
+            last_blocked = blocked;
+        else
+            blocked = last_blocked;
+        if (hosts >= 0)
+            last_hosts = hosts;
+        else
+            hosts = last_hosts;
+
+        if (allowed >= 0 || blocked >= 0 || hosts >= 0) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                /*
+                 * if (Util.isPlayStoreInstall(this))
+                 * builder.setContentText(getString(R.string.msg_packages, allowed, blocked));
+                 * else
+                 * builder.setContentText(getString(R.string.msg_hosts, allowed, blocked,
+                 * hosts));
+                 */
+                return builder.build();
+            } else {
+                NotificationCompat.BigTextStyle notification = new NotificationCompat.BigTextStyle(builder);
+                notification.bigText(getString(R.string.msg_started));
+                /*
+                 * if (Util.isPlayStoreInstall(this))
+                 * notification.setSummaryText(getString(R.string.msg_packages, allowed,
+                 * blocked));
+                 * else
+                 * notification.setSummaryText(getString(R.string.msg_hosts, allowed, blocked,
+                 * hosts));
+                 */
+                return notification.build();
+            }
+        } else
+            return builder.build();
+    }
+
+    private void updateEnforcingNotification(int allowed, int total) {
+        // Update notification
+        Notification notification = getEnforcingNotification(allowed, total - allowed, mapHostsBlocked.size());
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (Util.canNotify(this))
+            nm.notify(NOTIFY_ENFORCING, notification);
+    }
+
+    private Notification getWaitingNotification() {
+        Intent main = new Intent(this, ActivityMain.class);
+        PendingIntent pi = PendingIntentCompat.getActivity(this, 0, main, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "foreground");
+        builder.setSmallIcon(R.drawable.ic_rocket_white)
+                .setContentIntent(pi)
+                .setColor(getResources().getColor(R.color.colorTrackerControl))
+                .setOngoing(true)
+                .setAutoCancel(false);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
+            builder.setContentTitle(getString(R.string.msg_waiting));
+        else
+            builder.setContentTitle(getString(R.string.app_name))
+                    .setContentText(getString(R.string.msg_waiting));
+
+        return builder.build();
+    }
+
+    private void showDisabledNotification() {
+        Intent main = new Intent(this, ActivityMain.class);
+        PendingIntent pi = PendingIntentCompat.getActivity(this, 0, main, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "notify");
+        builder.setSmallIcon(R.drawable.ic_error_white_24dp)
+                .setContentTitle(getString(R.string.app_name))
+                .setContentText(getString(R.string.msg_revoked))
+                .setContentIntent(pi)
+                .setColor(getResources().getColor(R.color.colorTrackerControl))
+                .setOngoing(false)
+                .setAutoCancel(true);
+
+        builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET);
+
+        NotificationCompat.BigTextStyle notification = new NotificationCompat.BigTextStyle(builder);
+        notification.bigText(getString(R.string.msg_revoked));
+
+        Util.notify(this, NOTIFY_DISABLED, notification.build());
+    }
+
+
+
+    private void showAutoStartNotification() {
+        Intent main = new Intent(this, ActivityMain.class);
+        main.putExtra(ActivityMain.EXTRA_APPROVE, true);
+        PendingIntent pi = PendingIntentCompat.getActivity(this, NOTIFY_AUTOSTART, main,
+                PendingIntent.FLAG_UPDATE_CURRENT);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "notify");
+        builder.setSmallIcon(R.drawable.ic_error_white_24dp)
+                .setContentTitle(getString(R.string.app_name))
+                .setContentText(getString(R.string.msg_autostart))
+                .setContentIntent(pi)
+                .setColor(getResources().getColor(R.color.colorTrackerControl))
+                .setOngoing(false)
+                .setAutoCancel(true);
+
+        builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET);
+
+        NotificationCompat.BigTextStyle notification = new NotificationCompat.BigTextStyle(builder);
+        notification.bigText(getString(R.string.msg_autostart));
+
+        Util.notify(this, NOTIFY_AUTOSTART, notification.build());
+    }
+
+    private void showErrorNotification(String message) {
+        showErrorNotification(message, true);
+    }
+
+    /**
+     * @param unexpected whether to present the message as an unexpected error.
+     *                   A failure we diagnosed precisely — and whose message
+     *                   already says what happened and what it means for the
+     *                   user's traffic — reads as a crash once it is wrapped in
+     *                   "An unexpected error has occurred".
+     */
+    private void showErrorNotification(String message, boolean unexpected) {
+        String text = unexpected ? getString(R.string.msg_error, message) : message;
+        Intent main = new Intent(this, ActivityMain.class);
+        PendingIntent pi = PendingIntentCompat.getActivity(this, 0, main, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "notify");
+        builder.setSmallIcon(R.drawable.ic_error_white_24dp)
+                .setContentTitle(getString(R.string.app_name))
+                .setContentText(text)
+                .setContentIntent(pi)
+                .setColor(getResources().getColor(R.color.colorTrackerControl))
+                .setOngoing(false)
+                .setAutoCancel(true);
+
+        builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET);
+
+        NotificationCompat.BigTextStyle notification = new NotificationCompat.BigTextStyle(builder);
+        notification.bigText(text);
+        notification.setSummaryText(message);
+
+        Util.notify(this, NOTIFY_ERROR, notification.build());
+    }
+
+    private void showDohErrorNotification() {
+        // A local resolver we are not allowed to reach is not a DoH problem,
+        // and "consider disabling Secure DNS" is the wrong advice for it: the
+        // fix is one permission away. Say so instead (#701).
+        if (net.kollnig.missioncontrol.LocalNetworkAccess.isMissing(this)) {
+            showLocalNetworkNotification();
+            return;
+        }
+
+        Intent main = new Intent(this, ActivityMain.class);
+        PendingIntent pi = PendingIntentCompat.getActivity(this, 0, main, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "notify");
+        builder.setSmallIcon(R.drawable.ic_error_white_24dp)
+                .setContentTitle(getString(R.string.app_name))
+                .setContentText(getString(R.string.msg_doh_unreachable))
+                .setContentIntent(pi)
+                .setColor(getResources().getColor(R.color.colorTrackerControl))
+                .setOngoing(false)
+                .setAutoCancel(true)
+                .setOnlyAlertOnce(true);
+
+        builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET);
+
+        NotificationCompat.BigTextStyle notification = new NotificationCompat.BigTextStyle(builder);
+        notification.bigText(getString(R.string.msg_doh_unreachable));
+
+        Util.notify(this, NOTIFY_DOH_ERROR, notification.build());
+    }
+
+    private void showWireGuardErrorNotification(String message) {
+        // Same as the DoH case: a peer on the LAN that we may not talk to is a
+        // permission problem, not a tunnel problem, and sending the user to the
+        // WireGuard settings only wastes their time (#701).
+        if (net.kollnig.missioncontrol.LocalNetworkAccess.isMissing(this)) {
+            showLocalNetworkNotification();
+            return;
+        }
+
+        Intent main = new Intent(this, ActivitySettings.class);
+        PendingIntent pi = PendingIntentCompat.getActivity(this, NOTIFY_WG_ERROR, main,
+                PendingIntent.FLAG_UPDATE_CURRENT);
+
+        String detail = TextUtils.isEmpty(message)
+                ? getString(R.string.msg_wg_blocked)
+                : getString(R.string.msg_wg_blocked_detail, message);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "notify");
+        builder.setSmallIcon(R.drawable.ic_error_white_24dp)
+                .setContentTitle(getString(R.string.msg_wg_blocked_title))
+                .setContentText(detail)
+                .setContentIntent(pi)
+                .setColor(getResources().getColor(R.color.colorTrackerControl))
+                .setOngoing(true)
+                .setAutoCancel(false);
+
+        builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET);
+
+        NotificationCompat.BigTextStyle notification = new NotificationCompat.BigTextStyle(builder);
+        notification.bigText(detail);
+
+        Util.notify(this, NOTIFY_WG_ERROR, notification.build());
+    }
+
+    /**
+     * The provider had forgotten this device, so the failover path registered a
+     * fresh one and rewrote the saved profiles. Worth saying out loud: the user
+     * otherwise only ever sees "tunnel unavailable" while their profiles change
+     * underneath them (#860).
+     */
+    private void showWireGuardIdentityNotification(String providerLabel) {
+        Intent main = new Intent(this, ActivitySettings.class);
+        PendingIntent pi = PendingIntentCompat.getActivity(this, NOTIFY_WG_IDENTITY, main,
+                PendingIntent.FLAG_UPDATE_CURRENT);
+
+        String detail = getString(R.string.msg_wg_identity_renewed,
+                providerLabel == null ? "" : providerLabel);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "notify");
+        builder.setSmallIcon(R.drawable.ic_lock_outline_white_24dp)
+                .setContentTitle(getString(R.string.msg_wg_identity_renewed_title))
+                .setContentText(detail)
+                .setContentIntent(pi)
+                .setColor(getResources().getColor(R.color.colorTrackerControl))
+                .setAutoCancel(true);
+
+        builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET);
+
+        NotificationCompat.BigTextStyle notification = new NotificationCompat.BigTextStyle(builder);
+        notification.bigText(detail);
+
+        Util.notify(this, NOTIFY_WG_IDENTITY, notification.build());
+    }
+
+    private void clearWireGuardErrorNotification() {
+        NotificationManagerCompat.from(this).cancel(NOTIFY_WG_ERROR);
+    }
+
+    /**
+     * Local network access is missing and something the user configured needs
+     * it. Opens the main screen, where the warning row requests the permission.
+     */
+    private void showLocalNetworkNotification() {
+        Intent main = new Intent(this, ActivityMain.class);
+        PendingIntent pi = PendingIntentCompat.getActivity(this, NOTIFY_LOCAL_NETWORK, main,
+                PendingIntent.FLAG_UPDATE_CURRENT);
+
+        String detail = getString(R.string.msg_local_network_notify);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "notify");
+        builder.setSmallIcon(R.drawable.ic_error_white_24dp)
+                .setContentTitle(getString(R.string.msg_local_network_title))
+                .setContentText(detail)
+                .setContentIntent(pi)
+                .setColor(getResources().getColor(R.color.colorTrackerControl))
+                .setOngoing(false)
+                .setAutoCancel(true)
+                // Rebuilt on every network change; alert once, then sit quietly.
+                .setOnlyAlertOnce(true);
+
+        builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET);
+
+        NotificationCompat.BigTextStyle notification = new NotificationCompat.BigTextStyle(builder);
+        notification.bigText(detail);
+
+        Util.notify(this, NOTIFY_LOCAL_NETWORK, notification.build());
+    }
+
+    private void clearLocalNetworkNotification() {
+        NotificationManagerCompat.from(this).cancel(NOTIFY_LOCAL_NETWORK);
+    }
+
+    /**
+     * Private DNS is pinned to a hostname while we block DoT, which leaves the
+     * device with no working resolver. Opens the network settings, where the
+     * setting lives; naming the resolver makes clear which one is meant.
+     */
+    private void showPrivateDnsNotification(String specifier) {
+        Intent settings = new Intent(Settings.ACTION_WIRELESS_SETTINGS);
+        if (settings.resolveActivity(getPackageManager()) == null)
+            settings = new Intent(Settings.ACTION_WIFI_SETTINGS);
+        PendingIntent pi = PendingIntentCompat.getActivity(this, NOTIFY_PRIVATE_DNS, settings,
+                PendingIntent.FLAG_UPDATE_CURRENT);
+
+        String detail = getString(R.string.msg_private_dns_notify,
+                specifier != null ? specifier : getString(R.string.msg_private_dns_unknown_resolver));
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "notify");
+        builder.setSmallIcon(R.drawable.ic_error_white_24dp)
+                .setContentTitle(getString(R.string.msg_private_dns_title))
+                .setContentText(detail)
+                .setContentIntent(pi)
+                .setColor(getResources().getColor(R.color.colorTrackerControl))
+                .setOngoing(false)
+                .setAutoCancel(true)
+                // Rebuilt on every network change; alert once, then sit quietly.
+                .setOnlyAlertOnce(true);
+
+        builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET);
+
+        NotificationCompat.BigTextStyle notification = new NotificationCompat.BigTextStyle(builder);
+        notification.bigText(detail);
+
+        Util.notify(this, NOTIFY_PRIVATE_DNS, notification.build());
+    }
+
+    private void clearPrivateDnsNotification() {
+        NotificationManagerCompat.from(this).cancel(NOTIFY_PRIVATE_DNS);
+    }
+
+    private void requestPrivateDnsWarningUpdate() {
+        Handler handler = logHandler;
+        if (handler != null && !destroying)
+            handler.post(() -> {
+                if (!destroying)
+                    updatePrivateDnsBypassWarning();
+            });
+    }
+
+    private synchronized void schedulePrivateDnsWarningExpiry() {
+        privateDnsWarningExpiryHandler.removeCallbacks(privateDnsWarningExpiryRunnable);
+        long now = System.currentTimeMillis();
+        long latest = DatabaseHelper.getInstance(this).getLatestAllowedDot(
+                now - PRIVATE_DNS_WARNING_WINDOW_MS);
+        long delay = getPrivateDnsWarningExpiryDelay(now, latest);
+        if (delay >= 0 && !destroying)
+            privateDnsWarningExpiryHandler.postDelayed(privateDnsWarningExpiryRunnable, delay);
+    }
+
+    private synchronized void cancelPrivateDnsWarningExpiry() {
+        privateDnsWarningExpiryHandler.removeCallbacks(privateDnsWarningExpiryRunnable);
+    }
+
+    private void publishPrivateDnsWarningState(int state) {
+        Intent intent = new Intent(ActivityMain.ACTION_PRIVATE_DNS_WARNING_CHANGED);
+        intent.putExtra(ActivityMain.EXTRA_PRIVATE_DNS_WARNING_STATE, state);
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
+    }
+
+    private synchronized void updatePrivateDnsBypassWarning() {
+        if (Util.isPrivateDnsBlocked(this)) {
+            clearPrivateDnsBypassNotification();
+            cancelPrivateDnsWarningExpiry();
+            privateDnsWarningState = PRIVATE_DNS_WARNING_NONE;
+            publishPrivateDnsWarningState(privateDnsWarningState);
+            return;
+        }
+
+        // The loud warning may have been posted by an earlier evaluation before
+        // the user changed block_dot; keep the two notification IDs exclusive.
+        clearPrivateDnsNotification();
+        int state = getPrivateDnsWarningState(this);
+        if (shouldClearPrivateDnsWarning(state)) {
+            clearPrivateDnsBypassNotification();
+            cancelPrivateDnsWarningExpiry();
+            privateDnsWarningState = PRIVATE_DNS_WARNING_NONE;
+        } else {
+            if (shouldShowPrivateDnsWarning(privateDnsWarningState, state))
+                showPrivateDnsBypassNotification(state);
+            privateDnsWarningState = state;
+            if (state == PRIVATE_DNS_WARNING_ALLOWED_DOT)
+                schedulePrivateDnsWarningExpiry();
+            else
+                cancelPrivateDnsWarningExpiry();
+        }
+        publishPrivateDnsWarningState(privateDnsWarningState);
+    }
+
+    private synchronized void resetPrivateDnsBypassWarning() {
+        cancelPrivateDnsWarningExpiry();
+        clearPrivateDnsBypassNotification();
+        privateDnsWarningState = PRIVATE_DNS_WARNING_NONE;
+        publishPrivateDnsWarningState(privateDnsWarningState);
+    }
+
+    private void showPrivateDnsBypassNotification(int state) {
+        Intent settings;
+        if (state == PRIVATE_DNS_WARNING_ALLOWED_DOT)
+            settings = new Intent(this, ActivitySettings.class);
+        else {
+            settings = new Intent(Settings.ACTION_WIRELESS_SETTINGS);
+            if (settings.resolveActivity(getPackageManager()) == null)
+                settings = new Intent(Settings.ACTION_WIFI_SETTINGS);
+        }
+        PendingIntent pi = PendingIntentCompat.getActivity(this, NOTIFY_PRIVATE_DNS_BYPASS, settings,
+                PendingIntent.FLAG_UPDATE_CURRENT);
+
+        String detail;
+        if (state == PRIVATE_DNS_WARNING_HOSTNAME) {
+            String specifier = Util.getPrivateDnsSpecifier(this);
+            String resolver = TextUtils.isEmpty(specifier)
+                    ? getString(R.string.msg_private_dns_unknown_resolver) : specifier;
+            detail = getString(R.string.msg_private_dns_bypass_notify, resolver);
+        } else
+            detail = getString(R.string.msg_private_dns_bypass_allowed_notify);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "notify");
+        builder.setSmallIcon(R.drawable.ic_error_white_24dp)
+                .setContentTitle(getString(R.string.msg_private_dns_bypass_title))
+                .setContentText(detail)
+                .setContentIntent(pi)
+                .setColor(getResources().getColor(R.color.colorTrackerControl))
+                .setOngoing(false)
+                .setAutoCancel(true)
+                .setOnlyAlertOnce(true);
+
+        builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET);
+
+        NotificationCompat.BigTextStyle notification = new NotificationCompat.BigTextStyle(builder);
+        notification.bigText(detail);
+
+        Util.notify(this, NOTIFY_PRIVATE_DNS_BYPASS, notification.build());
+    }
+
+    private void clearPrivateDnsBypassNotification() {
+        NotificationManagerCompat.from(this).cancel(NOTIFY_PRIVATE_DNS_BYPASS);
+    }
+
+    private void showUpdateNotification(String name, String url) {
+        if (Util.isFDroidInstall())
+            return;
+
+        Intent download = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+        PendingIntent pi = PendingIntentCompat.getActivity(this, 0, download, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "notify");
+        builder.setSmallIcon(R.drawable.ic_rocket_white)
+                .setContentTitle(name)
+                .setContentText(getString(R.string.msg_update))
+                .setContentIntent(pi)
+                .setColor(getResources().getColor(R.color.colorTrackerControl))
+                .setOngoing(false)
+                .setAutoCancel(true);
+
+        builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET);
+
+        Util.notify(this, NOTIFY_UPDATE, builder.build());
+    }
+
+    private void removeWarningNotifications() {
+        NotificationManagerCompat.from(this).cancel(NOTIFY_DISABLED);
+        NotificationManagerCompat.from(this).cancel(NOTIFY_AUTOSTART);
+        NotificationManagerCompat.from(this).cancel(NOTIFY_ERROR);
+        NotificationManagerCompat.from(this).cancel(NOTIFY_DOH_ERROR);
+    }
+
+    private class Builder extends VpnService.Builder {
+        private Network activeNetwork;
+        private NetworkInfo networkInfo;
+        private int mtu;
+        private boolean metered = true;
+        private List<String> listAddress = new ArrayList<>();
+        private List<String> listSearchDomain = new ArrayList<>();
+        private List<String> listExcludedRoute = new ArrayList<>();
+        private List<String> listRoute = new ArrayList<>();
+        private List<InetAddress> listDns = new ArrayList<>();
+        private List<String> listDisallowed = new ArrayList<>();
+
+        private Builder() {
+            super();
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            activeNetwork = cm.getActiveNetwork();
+            networkInfo = cm.getActiveNetworkInfo();
+        }
+
+        /**
+         * Kept in the comparison below so a changed metered flag forces a real
+         * re-establish instead of the "Native restart" shortcut (#763): the flag
+         * only reaches apps through {@link VpnService.Builder#establish()}.
+         */
+        @RequiresApi(api = Build.VERSION_CODES.Q)
+        @Override
+        public VpnService.Builder setMetered(boolean metered) {
+            this.metered = metered;
+            super.setMetered(metered);
+            return this;
+        }
+
+        @Override
+        public VpnService.Builder setMtu(int mtu) {
+            this.mtu = mtu;
+            super.setMtu(mtu);
+            return this;
+        }
+
+        @Override
+        public Builder addAddress(String address, int prefixLength) {
+            listAddress.add(address + "/" + prefixLength);
+            super.addAddress(address, prefixLength);
+            return this;
+        }
+
+        @Override
+        public Builder addRoute(String address, int prefixLength) {
+            listRoute.add(address + "/" + prefixLength);
+            super.addRoute(address, prefixLength);
+            return this;
+        }
+
+        @Override
+        public Builder addRoute(InetAddress address, int prefixLength) {
+            listRoute.add(address.getHostAddress() + "/" + prefixLength);
+            super.addRoute(address, prefixLength);
+            return this;
+        }
+
+        @Override
+        public Builder addDnsServer(InetAddress address) {
+            listDns.add(address);
+            super.addDnsServer(address);
+            return this;
+        }
+
+        /**
+         * Recorded for the comparison below (#763): a changed search domain only
+         * reaches apps through {@link VpnService.Builder#establish()}.
+         */
+        @Override
+        public Builder addSearchDomain(String domain) {
+            listSearchDomain.add(domain);
+            super.addSearchDomain(domain);
+            return this;
+        }
+
+        /**
+         * Recorded for the comparison below (#763). The ePDG exclusions are
+         * re-resolved on every rebuild behind a short timeout, so a rebuild that
+         * resolves them after an earlier one timed out must replace the live
+         * interface — otherwise Wi-Fi calling stays broken until some unrelated
+         * change forces a real replacement.
+         */
+        @RequiresApi(api = Build.VERSION_CODES.TIRAMISU)
+        @Override
+        public Builder excludeRoute(IpPrefix prefix) {
+            listExcludedRoute.add(prefix.toString());
+            super.excludeRoute(prefix);
+            return this;
+        }
+
+        /**
+         * Excludes apps, such as system apps if disabled, as well as deactivated apps
+         * by user
+         *
+         * @param packageName
+         * @return
+         * @throws PackageManager.NameNotFoundException
+         */
+        @Override
+        public Builder addDisallowedApplication(String packageName) throws PackageManager.NameNotFoundException {
+            listDisallowed.add(packageName);
+            super.addDisallowedApplication(packageName);
+            return this;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (!(obj instanceof Builder))
+                return false;
+
+            Builder other = (Builder) obj;
+
+            if (!Objects.equals(this.activeNetwork, other.activeNetwork))
+                return false;
+
+            // Two offline builders are equal: treating both-null as different
+            // forced a needless interface replacement on every reload while
+            // there was no active network at all.
+            if (this.networkInfo == null || other.networkInfo == null) {
+                if (this.networkInfo != other.networkInfo)
+                    return false;
+            } else if (this.networkInfo.getType() != other.networkInfo.getType())
+                return false;
+
+            if (this.mtu != other.mtu)
+                return false;
+
+            if (this.metered != other.metered)
+                return false;
+
+            if (this.listAddress.size() != other.listAddress.size())
+                return false;
+
+            if (this.listRoute.size() != other.listRoute.size())
+                return false;
+
+            if (this.listDns.size() != other.listDns.size())
+                return false;
+
+            if (this.listDisallowed.size() != other.listDisallowed.size())
+                return false;
+
+            if (this.listSearchDomain.size() != other.listSearchDomain.size())
+                return false;
+
+            if (this.listExcludedRoute.size() != other.listExcludedRoute.size())
+                return false;
+
+            for (String address : this.listAddress)
+                if (!other.listAddress.contains(address))
+                    return false;
+
+            for (String route : this.listRoute)
+                if (!other.listRoute.contains(route))
+                    return false;
+
+            for (InetAddress dns : this.listDns)
+                if (!other.listDns.contains(dns))
+                    return false;
+
+            for (String pkg : this.listDisallowed)
+                if (!other.listDisallowed.contains(pkg))
+                    return false;
+
+            for (String domain : this.listSearchDomain)
+                if (!other.listSearchDomain.contains(domain))
+                    return false;
+
+            for (String route : this.listExcludedRoute)
+                if (!other.listExcludedRoute.contains(route))
+                    return false;
+
+            return true;
+        }
+    }
+
+    public static void run(String reason, Context context) {
+        Intent intent = new Intent(context, ServiceSinkhole.class);
+        intent.putExtra(EXTRA_COMMAND, Command.run);
+        intent.putExtra(EXTRA_REASON, reason);
+
+        try {
+            ContextCompat.startForegroundService(context, intent);
+        } catch (Throwable ex) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    ex instanceof ForegroundServiceStartNotAllowedException)
+                try {
+                    context.startService(intent);
+                } catch (Throwable exex) {
+                    Log.e(TAG, exex + "\n" + Log.getStackTraceString(exex));
+                }
+        }
+    }
+
+    public static void start(String reason, Context context) {
+        start(reason, context, false);
+    }
+
+    public static void start(String reason, Context context, boolean userInitiated) {
+        Intent intent = new Intent(context, ServiceSinkhole.class);
+        intent.putExtra(EXTRA_COMMAND, Command.start);
+        intent.putExtra(EXTRA_REASON, reason);
+        if (userInitiated)
+            intent.putExtra(EXTRA_USER_INITIATED, true);
+        try {
+            ContextCompat.startForegroundService(context, intent);
+        } catch (Throwable ex) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    ex instanceof ForegroundServiceStartNotAllowedException)
+                try {
+                    context.startService(intent);
+                } catch (Throwable exex) {
+                    Log.e(TAG, exex + "\n" + Log.getStackTraceString(exex));
+                }
+        }
+    }
+
+    public static void reload(String reason, Context context, boolean interactive) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        if (prefs.getBoolean("enabled", false)) {
+            Intent intent = new Intent(context, ServiceSinkhole.class);
+            intent.putExtra(EXTRA_COMMAND, Command.reload);
+            intent.putExtra(EXTRA_REASON, reason);
+            intent.putExtra(EXTRA_INTERACTIVE, interactive);
+            try {
+                ContextCompat.startForegroundService(context, intent);
+            } catch (Throwable ex) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                        ex instanceof ForegroundServiceStartNotAllowedException)
+                    try {
+                        context.startService(intent);
+                    } catch (Throwable exex) {
+                        Log.e(TAG, exex + "\n" + Log.getStackTraceString(exex));
+                    }
+            }
+        }
+    }
+
+    public static void stop(String reason, Context context, boolean vpnonly) {
+        Intent intent = new Intent(context, ServiceSinkhole.class);
+        intent.putExtra(EXTRA_COMMAND, Command.stop);
+        intent.putExtra(EXTRA_REASON, reason);
+        intent.putExtra(EXTRA_TEMPORARY, vpnonly);
+        try {
+            ContextCompat.startForegroundService(context, intent);
+        } catch (Throwable ex) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    ex instanceof ForegroundServiceStartNotAllowedException)
+                try {
+                    context.startService(intent);
+                } catch (Throwable exex) {
+                    Log.e(TAG, exex + "\n" + Log.getStackTraceString(exex));
+                }
+        }
+    }
+
+    public static void reloadStats(String reason, Context context) {
+        Intent intent = new Intent(context, ServiceSinkhole.class);
+        intent.putExtra(EXTRA_COMMAND, Command.stats);
+        intent.putExtra(EXTRA_REASON, reason);
+        try {
+            ContextCompat.startForegroundService(context, intent);
+        } catch (Throwable ex) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    ex instanceof ForegroundServiceStartNotAllowedException)
+                try {
+                    context.startService(intent);
+                } catch (Throwable exex) {
+                    Log.e(TAG, exex + "\n" + Log.getStackTraceString(exex));
+                }
+        }
+    }
+
+    public static void dohError(Context context) {
+        Intent intent = new Intent(context, ServiceSinkhole.class);
+        intent.putExtra(EXTRA_COMMAND, Command.doh_error);
+        try {
+            ContextCompat.startForegroundService(context, intent);
+        } catch (Throwable ex) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    ex instanceof ForegroundServiceStartNotAllowedException)
+                try {
+                    context.startService(intent);
+                } catch (Throwable exex) {
+                    Log.e(TAG, exex + "\n" + Log.getStackTraceString(exex));
+                }
+        }
+    }
+
+    public static boolean isValidated(Network network) {
+        if (network == null)
+            return false;
+        synchronized (mapValidated) {
+            return mapValidated.containsKey(network);
+        }
+    }
+
+    // Connectivity-probe backoff arithmetic, extracted so it can be exercised by a
+    // plain-JVM unit test without a NetworkCallback/Network instance.
+    static final long VALIDATION_BACKOFF_INITIAL_MS = 30 * 1000L; // 30s
+    static final long VALIDATION_BACKOFF_MAX_MS = 10 * 60 * 1000L; // 10 min
+
+    /** Backoff to apply after a consecutive probe failure: doubles from a 30s floor, capped at 10 min. */
+    static long nextValidationBackoffMs(long previousBackoffMs) {
+        long base = previousBackoffMs <= 0 ? VALIDATION_BACKOFF_INITIAL_MS : previousBackoffMs * 2;
+        return Math.min(base, VALIDATION_BACKOFF_MAX_MS);
+    }
+
+    /** True while a retry should still be withheld, i.e. less than backoffMs has elapsed since the last failure. */
+    static boolean isValidationBackoffOpen(long lastFailureUptimeMs, long backoffMs, long nowUptimeMs) {
+        return nowUptimeMs < lastFailureUptimeMs + backoffMs;
+    }
+
+    /**
+     * Re-runs the connectivity probe for the active network on screen-on.
+     *
+     * Nothing schedules work for a backoff window's expiry, and retries are held
+     * back while non-interactive, so a network whose probe failed would otherwise
+     * wait for another capabilities callback that Android may never emit — leaving
+     * isValidated() false indefinitely for a route that has since recovered.
+     * Screen-on is exactly when a retry is allowed again, so re-entering the
+     * callback here is the cheapest way to give the probe another chance.
+     */
+    private void recheckNetworkValidation() {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null)
+                return;
+            Network active = cm.getActiveNetwork();
+            if (active == null)
+                return;
+            NetworkCapabilities capabilities = cm.getNetworkCapabilities(active);
+            if (capabilities == null)
+                return;
+            networkMonitorCallback.onCapabilitiesChanged(active, capabilities);
+        } catch (Throwable ex) {
+            Log.e(TAG, ex.toString() + "\n" + Log.getStackTraceString(ex));
+        }
+    }
+}

@@ -1,0 +1,232 @@
+name: Test
+
+on:
+  push:
+    branches: [ master, main ]
+    tags: [ '[0-9]*' ]
+  pull_request:
+    branches: [ master, main, 'codex/**' ]
+
+jobs:
+  native_defensive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run native defensive regression tests
+        run: bash app/src/test/native/run_defensive_tests.sh
+
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          # Robolectric SDK 36 (see app/src/test/resources/robolectric.properties)
+          # ships jars compiled with Java 21 and refuses to run on Java 17.
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Install Android native build tools
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "cmake;3.22.1" \
+            "ndk;27.2.12479018"
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wgbridge-rs/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('wgbridge-rs/Cargo.lock') }}
+
+      - name: Set up Rust
+        run: ./scripts/setup_rust_android.sh
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6.4.0
+
+      - name: Prefetch Gradle dependencies
+        run: |
+          ./gradlew :app:dependencies
+          ./gradlew :app:prefetchAndroidLintDependencies
+          # :app:dependencies only resolves dependency metadata, not the
+          # actual test-variant classpath artifacts (e.g. mockwebserver3).
+          # Compile the unit tests online once so their classpath is cached
+          # before the offline run below.
+          ./gradlew :app:assembleFdroidDebugUnitTest
+          # Compiling and assembling only ever resolves compile classpaths, so
+          # runtime-scoped transitive dependencies stay uncached. Resolve the
+          # runtime classpaths too, or the offline steps below cannot find them.
+          ./gradlew :app:prefetchOfflineBuildClasspaths
+
+      - name: Run Rust unit tests
+        run: |
+          # Covers the whole workspace, including the FFI-boundary tests for
+          # the C ABI the NetGuard engine calls (wgbridge-rs/tests/).
+          cargo test --manifest-path wgbridge-rs/Cargo.toml --workspace --locked --offline
+
+      - name: Run DNS-over-TCP framing and detection regression tests
+        run: bash app/src/test/native/run_dns_frame_tests.sh
+
+      - name: Run native socket hotpath host tests
+        run: |
+          COMMON="-D_GNU_SOURCE -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -fsanitize=address,undefined -fno-omit-frame-pointer -include app/src/test/native/host_compat/linux_test.h -idirafter app/src/test/native/host_compat -Iapp/src/main/jni/netguard"
+          cc $COMMON -o /tmp/tcp_half_close_test \
+            app/src/test/native/tcp_half_close_test.c \
+            app/src/main/jni/netguard/tcp.c \
+            -Wl,--wrap=close -Wl,--wrap=connect -Wl,--wrap=send
+          /tmp/tcp_half_close_test
+
+          cc $COMMON -o /tmp/udp_socket_test \
+            app/src/test/native/udp_socket_test.c \
+            app/src/main/jni/netguard/udp.c \
+            -Wl,--wrap=close -Wl,--wrap=fcntl -Wl,--wrap=recv \
+            -Wl,--wrap=sendto -Wl,--wrap=socket -Wl,--wrap=write
+          /tmp/udp_socket_test
+
+          cc $COMMON -o /tmp/icmp_socket_test \
+            app/src/test/native/icmp_socket_test.c \
+            app/src/main/jni/netguard/icmp.c \
+            -Wl,--wrap=close -Wl,--wrap=fcntl -Wl,--wrap=sendto \
+            -Wl,--wrap=socket
+          /tmp/icmp_socket_test
+
+      - name: Run remaining native policy and real epoll tests
+        run: |
+          # Prefer real Linux headers; the compatibility directory supplies
+          # only headers absent on the host (JNI and Android declarations).
+          COMMON="-D_GNU_SOURCE -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -ffunction-sections -fdata-sections -Wl,--gc-sections -include app/src/test/native/host_compat/linux_test.h -idirafter app/src/test/native/host_compat -Iapp/src/main/jni/netguard"
+          for TEST in tcp_queue tcp_window; do
+            cc $COMMON -o /tmp/$TEST \
+              app/src/test/native/${TEST}_test.c app/src/main/jni/netguard/tcp.c
+            /tmp/$TEST
+          done
+          cc $COMMON -o /tmp/route_flow_test \
+            app/src/test/native/route_flow_test.c app/src/main/jni/netguard/policy.c
+          /tmp/route_flow_test
+          cc $COMMON -o /tmp/ip_header_test \
+            app/src/test/native/ip_header_test.c app/src/test/native/ip_header_failfast.c \
+            app/src/main/jni/netguard/ip.c
+          /tmp/ip_header_test
+          cc $COMMON -o /tmp/tcp_epoll_test \
+            app/src/test/native/tcp_epoll_test.c app/src/main/jni/netguard/tcp.c \
+            -Wl,--wrap=close -Wl,--wrap=connect -Wl,--wrap=send
+          /tmp/tcp_epoll_test
+
+      - name: Run IPv6 extension header walk host tests
+        run: |
+          cc -Wall -Wextra -Werror -Iapp/src/main/jni/netguard \
+            -o /tmp/ip6_ext_test \
+            app/src/test/native/ip6_ext_test.c app/src/main/jni/netguard/ip6_ext.c
+          /tmp/ip6_ext_test
+
+      - name: Run UDP state host tests
+        run: |
+          cc -Wall -Wextra -Werror -Iapp/src/main/jni/netguard \
+            -o /tmp/udp_state_test \
+            app/src/test/native/udp_state_test.c
+          /tmp/udp_state_test
+
+      - name: Run WireGuard flow-cache host tests
+        run: |
+          cc -Wall -Wextra -Werror -Iapp/src/main/jni/netguard \
+            -o /tmp/wg_flow_cache_test \
+            app/src/test/native/wg_flow_cache_test.c
+          /tmp/wg_flow_cache_test
+
+      - name: Run unit tests
+        run: ./gradlew testFdroidDebugUnitTest --offline
+
+      - name: Build F-Droid release APK offline
+        run: ./gradlew :app:assembleFdroidRelease --offline
+
+      - name: Verify WireGuard libraries in F-Droid APK
+        run: |
+          APK=$(find app/build/outputs/apk/fdroid -type f -name '*.apk' -print -quit)
+          test -n "$APK"
+          for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
+            test "$(unzip -Z1 "$APK" "lib/$ABI/libwgbridge.so")" = "lib/$ABI/libwgbridge.so"
+          done
+
+          # The routing policy is reached by dlsym from libnetguard, so a
+          # stripped or renamed export degrades silently into "no per-app
+          # routing" rather than failing the build. readelf reads any
+          # architecture's ELF, unlike the host nm.
+          for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
+            unzip -p "$APK" "lib/$ABI/libwgbridge.so" > /tmp/libwgbridge-$ABI.so
+            SYMS=$(readelf --dyn-syms --wide "/tmp/libwgbridge-$ABI.so" | awk '{print $NF}')
+            for SYM in tc_policy_abi_version tc_policy_set_route_uids \
+                       tc_policy_clear_route_uids tc_policy_is_tunnel_uid \
+                       tc_policy_wants_tunnel tc_policy_dest_tunnelled; do
+              echo "$SYMS" | grep -qx "$SYM" \
+                || { echo "missing dynamic symbol $SYM in $ABI"; exit 1; }
+            done
+          done
+
+  instrumentation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Install Android native build tools
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "cmake;3.22.1" \
+            "ndk;27.2.12479018"
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wgbridge-rs/target
+          key: cargo-android-${{ runner.os }}-${{ hashFiles('wgbridge-rs/Cargo.lock') }}
+
+      - name: Set up Rust
+        run: ./scripts/setup_rust_android.sh
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6.4.0
+
+      - name: Prefetch Gradle dependencies
+        run: |
+          ./gradlew :app:dependencies
+          # Warm the cache for the androidTest classpath (androidx.test.*).
+          # Running the tests themselves still needs network access: the
+          # Unified Test Platform runner classpath (UTP, dagger, protobuf,
+          # etc.) is only resolved once a device is actually connected.
+          ./gradlew :app:assembleFdroidDebugAndroidTest
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run instrumentation tests
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          # API 37 has no published emulator system image yet; 36 is the
+          # newest one available while compileSdk/targetSdk track the preview.
+          api-level: 36
+          arch: x86_64
+          ndk: 27.2.12479018
+          profile: pixel_7
+          script: ./gradlew connectedFdroidDebugAndroidTest
