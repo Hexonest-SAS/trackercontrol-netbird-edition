@@ -912,6 +912,8 @@ public class ServiceSinkhole extends VpnService {
                 // VPN off, OS is killing us, etc.) so WG should not survive.
                 net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.stop(
                         () -> { jni_wireguard_stop(); return kotlin.Unit.INSTANCE; });
+                net.kollnig.missioncontrol.netbird.NetbirdEgress.INSTANCE.stop(
+                        () -> { jni_wireguard_stop(); return kotlin.Unit.INSTANCE; });
                 jni_wireguard_required(false);
                 // WgEgress clears its error as it tears the tunnel down, so the
                 // state listener already retracts this one; the call remains for
@@ -1848,7 +1850,17 @@ public class ServiceSinkhole extends VpnService {
         // accepts per its AllowedIPs for our peer entry — using the default
         // 10.1.10.1 makes the peer drop everything (handshake works, but no
         // data ever flows back).
-        boolean wgEnabled = prefs.getBoolean("wg_enabled", false);
+        // NetBird prime sur WireGuard : s'il est activé, le profil WG est ignoré ici.
+        boolean nbEnabled = prefs.getBoolean(net.kollnig.missioncontrol.netbird.NetbirdEgress.PREF_ENABLED, false);
+        String nbAddress = nbEnabled
+                ? prefs.getString(net.kollnig.missioncontrol.netbird.NetbirdEgress.PREF_ADDRESS, "") : "";
+        String nbAddress6 = nbEnabled
+                ? prefs.getString(net.kollnig.missioncontrol.netbird.NetbirdEgress.PREF_ADDRESS6, "") : "";
+        List<String> nbRoutes = nbEnabled
+                ? net.kollnig.missioncontrol.netbird.NetbirdEgress.storedRoutes(prefs)
+                : new ArrayList<>();
+        boolean nbActive = nbEnabled && !TextUtils.isEmpty(nbAddress);
+        boolean wgEnabled = prefs.getBoolean("wg_enabled", false) && !nbEnabled;
         String wgConfigText = wgEnabled ? prefs.getString("wg_config", "") : "";
         net.kollnig.missioncontrol.wg.WgConfig wgParsed = null;
         String wgVpn4 = null;
@@ -1877,16 +1889,24 @@ public class ServiceSinkhole extends VpnService {
                 Log.w(TAG, "WG config parse failed for builder: " + ex.getMessage());
             }
         }
+        if (nbActive) {
+            // Adresse NetBird mémorisée (reçue par configureInterface), sans préfixe, en /32 comme WG.
+            wgVpn4 = nbAddress.split("/")[0].trim();
+            if (!TextUtils.isEmpty(nbAddress6))
+                wgVpn6 = nbAddress6.split("/")[0].trim();
+        }
         String vpn4 = wgVpn4 != null ? wgVpn4 : prefs.getString("vpn4", "10.1.10.1");
-        Log.i(TAG, "Using VPN4=" + vpn4 + (wgVpn4 != null ? " (from WG config)" : ""));
+        Log.i(TAG, "Using VPN4=" + vpn4 + (wgVpn4 != null ? (nbActive ? " (from NetBird)" : " (from WG config)") : ""));
         builder.addAddress(vpn4, 32);
         if (ip6) {
             String vpn6 = wgVpn6 != null ? wgVpn6
                     : prefs.getString("vpn6", "fd00:1:fd00:1:fd00:1:fd00:1");
-            Log.i(TAG, "Using VPN6=" + vpn6 + (wgVpn6 != null ? " (from WG config)" : ""));
+            Log.i(TAG, "Using VPN6=" + vpn6 + (wgVpn6 != null ? " (from WG/NetBird)" : ""));
             builder.addAddress(vpn6, 128);
         }
 
+        // TODO P4 : DNS NetBird (netbird_dns / netbird_search_domains) ; pour l'instant les
+        // serveurs DNS restent ceux de TrackerControl.
         // DNS address
         if (dnsServers == null)
             dnsServers = getDns(ServiceSinkhole.this);
@@ -1918,7 +1938,9 @@ public class ServiceSinkhole extends VpnService {
         // hand LAN and reserved traffic to the peer, which drops it.
         boolean tetheringCompat = prefs.getBoolean("tcp_mss_clamp", false);
         List<IPUtil.CIDR> routes;
-        if (wgEnabled && !wgAllowedIps.isEmpty()) {
+        if (nbActive && !nbRoutes.isEmpty()) {
+            routes = VpnRoutes.getRoutes(nbRoutes);
+        } else if (wgEnabled && !wgAllowedIps.isEmpty()) {
             if (tetheringCompat)
                 Log.i(TAG, "Tethering compatibility routes skipped: WireGuard AllowedIPs apply");
             routes = VpnRoutes.getRoutes(wgAllowedIps);
@@ -2050,6 +2072,10 @@ public class ServiceSinkhole extends VpnService {
                 }
             }
             if (wgMtu < mtu) mtu = wgMtu;
+        }
+        if (nbActive) {
+            int nbMtu = prefs.getInt(net.kollnig.missioncontrol.netbird.NetbirdEgress.PREF_MTU, 0);
+            if (nbMtu >= 1280 && nbMtu <= 1500 && nbMtu < mtu) mtu = nbMtu;
         }
         Log.i(TAG, "MTU=" + mtu);
         builder.setMtu(mtu);
@@ -2202,23 +2228,49 @@ public class ServiceSinkhole extends VpnService {
                                                 R.string.msg_wg_account_expired, providerLabel));
                             }
                         }));
-        jni_wireguard_required(prefs.getBoolean("wg_enabled", false)
-                && !TextUtils.isEmpty(prefs.getString("wg_config", "")));
-        boolean wgOk = net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.startOrUpdate(
-                prefs.getBoolean("wg_enabled", false),
-                prefs.getString("wg_config", ""),
-                ServiceSinkhole.this,
-                vpn,
-                Util.isInteractive(ServiceSinkhole.this),
-                prefs.getBoolean("wg_keepalive_when_screen_off", false),
-                () -> jni_wireguard_start(),
-                () -> { jni_wireguard_stop(); return kotlin.Unit.INSTANCE; });
-        if (!wgOk) {
-            String wgError = net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.getLastError();
-            Log.w(TAG, "WireGuard egress failed to start; blocking traffic: " + wgError);
-            showWireGuardErrorNotification(wgError);
-            scheduleWireGuardStartupRecovery();
-            return false;
+        if (prefs.getBoolean(net.kollnig.missioncontrol.netbird.NetbirdEgress.PREF_ENABLED, false)) {
+            // NetBird prime sur WireGuard : WgEgress doit être arrêté.
+            net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.stop(
+                    () -> { jni_wireguard_stop(); return kotlin.Unit.INSTANCE; });
+            List<String> nbStored = net.kollnig.missioncontrol.netbird.NetbirdEgress.storedRoutes(prefs);
+            jni_wireguard_required(!nbStored.isEmpty());
+            try {
+                net.kollnig.missioncontrol.wgbridge.Wgbridge.setPolicyAllowedIps(TextUtils.join(";", nbStored));
+            } catch (Throwable ex) {
+                Log.w(TAG, "NetBird policy: " + ex);
+            }
+            boolean nbOk = net.kollnig.missioncontrol.netbird.NetbirdEgress.INSTANCE.startOrUpdate(
+                    true,
+                    ServiceSinkhole.this,
+                    vpn,
+                    () -> jni_wireguard_start(),
+                    () -> { jni_wireguard_stop(); return kotlin.Unit.INSTANCE; });
+            if (!nbOk) {
+                Log.w(TAG, "NetBird egress failed to start; blocking traffic: "
+                        + net.kollnig.missioncontrol.netbird.NetbirdEgress.INSTANCE.getLastError());
+                return false;
+            }
+        } else {
+            net.kollnig.missioncontrol.netbird.NetbirdEgress.INSTANCE.stop(
+                    () -> { jni_wireguard_stop(); return kotlin.Unit.INSTANCE; });
+            jni_wireguard_required(prefs.getBoolean("wg_enabled", false)
+                    && !TextUtils.isEmpty(prefs.getString("wg_config", "")));
+            boolean wgOk = net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.startOrUpdate(
+                    prefs.getBoolean("wg_enabled", false),
+                    prefs.getString("wg_config", ""),
+                    ServiceSinkhole.this,
+                    vpn,
+                    Util.isInteractive(ServiceSinkhole.this),
+                    prefs.getBoolean("wg_keepalive_when_screen_off", false),
+                    () -> jni_wireguard_start(),
+                    () -> { jni_wireguard_stop(); return kotlin.Unit.INSTANCE; });
+            if (!wgOk) {
+                String wgError = net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.getLastError();
+                Log.w(TAG, "WireGuard egress failed to start; blocking traffic: " + wgError);
+                showWireGuardErrorNotification(wgError);
+                scheduleWireGuardStartupRecovery();
+                return false;
+            }
         }
         cancelWireGuardStartupRecovery(true);
         net.kollnig.missioncontrol.wg.VpnKeyRotationManager.maybeRotateDue(ServiceSinkhole.this);
@@ -4349,6 +4401,8 @@ public class ServiceSinkhole extends VpnService {
             // are idempotent, and both must precede jni_done() below.
             try {
                 net.kollnig.missioncontrol.wg.WgEgress.INSTANCE.stop(
+                        () -> { jni_wireguard_stop(); return kotlin.Unit.INSTANCE; });
+                net.kollnig.missioncontrol.netbird.NetbirdEgress.INSTANCE.stop(
                         () -> { jni_wireguard_stop(); return kotlin.Unit.INSTANCE; });
                 jni_wireguard_required(false);
                 net.kollnig.missioncontrol.dns.DnsProxyServer.getInstance(ServiceSinkhole.this).stop();
