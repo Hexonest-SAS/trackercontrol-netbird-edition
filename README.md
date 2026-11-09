@@ -63,7 +63,7 @@ echo "sdk.dir=$HOME/Android/Sdk" > local.properties
 ## Installer sur le téléphone
 
 Signature : clé de debug de la machine de build (`~/.android/debug.keystore`, alias
-`androiddebugkey`, SHA-256 `dd2dcbbf…ef1fb1`). Décision D5 : on reste sur cette clé tant que
+`androiddebugkey`, SHA-256 `dd2dcbbf…ef1fb1`). Décision D6 de la roadmap : on reste sur cette clé tant que
 l'app ne quitte pas le téléphone de Fabien. **Sauvegarder ce fichier** : sans lui, plus aucune
 mise à jour sur place n'est possible (Android refuse une signature différente).
 
