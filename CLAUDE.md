@@ -5,7 +5,7 @@ WireGuard, client BSD-3) : un seul VPN Android, qui filtre les traqueurs ET fait
 de Fabien (`*.vpn.hexonest.fr`), avec tous les pairs, le DNS et les politiques NetBird.
 
 Contexte d'usage : Android n'autorise qu'un VPN à la fois ; Fabien veut garder TrackerControl et avoir
-NetBird complet sur son téléphone (notamment pour joindre la PWA claudecode+ sur 100.102.79.78:7879).
+NetBird complet sur son téléphone (notamment pour joindre ses services internes par le réseau NetBird).
 
 ## Langue
 Répondre et documenter en français. Code et commentaires : suivre les conventions des dépôts en amont.
@@ -44,11 +44,15 @@ Sources de référence clonées (peu profondes) dans `upstream/` :
   domaines NetBird vers le résolveur NetBird.
 
 ### Environnement
-- Présents : ~/Android/Sdk (NDK 29.0.13846066), OpenJDK 25, Rust + cibles Android.
-- Manquants : Go 1.26 et gomobile (à installer dans ~/.local, sans sudo).
+- Installés : ~/Android/Sdk (NDK 29.0.14206865 épinglé par TrackerControl, plateforme 37.0), OpenJDK 25,
+  Rust 1.95.0 + cargo-ndk 4.1.2, Go 1.26.10 et gomobile/gobind (pin x/mobile de NetBird) dans ~/.local.
+  Chemins : `. scripts/env.sh`. AAR du moteur : `scripts/build-netbird-aar.sh`.
 - Disque : surveiller l'espace (builds Android + Go + Rust) ; un disque plein a déjà bloqué la machine.
 
 ## Règles
+- Dépôt public (https://github.com/Hexonest-SAS/trackercontrol-netbird-edition, décision D5) :
+  aucune donnée personnelle ni interne dans les fichiers versionnés (IP NetBird réelles, noms de pairs,
+  clés) ; dans les tests et la doc, utiliser des exemples neutres (100.90.0.0/16, fd00:1234:5678:9abc::/64).
 - Ne jamais pousser ni publier quoi que ce soit (dépôts, stores) sans demande explicite de Fabien.
 - Tester sur l'émulateur ou produire un APK ; l'installation sur le téléphone se fait par Fabien.
 - Décision bloquante (choix d'architecture non tranché, licence, sécurité) : outil ask_user_important.

@@ -62,7 +62,7 @@ func (t *WGTunDevice) Create(routes []string, dns string, searchDomains []string
 	}
 
 	// TrackerControl: the addresses carry their overlay prefix length (e.g.
-	// 100.102.136.18/16) rather than /32, so the TunAdapter can route the overlay
+	// 100.90.20.30/16) rather than /32, so the TunAdapter can route the overlay
 	// network itself: routes do not include it at Create time on Android.
 	ipv6Host := ""
 	if t.address.HasIPv6() {

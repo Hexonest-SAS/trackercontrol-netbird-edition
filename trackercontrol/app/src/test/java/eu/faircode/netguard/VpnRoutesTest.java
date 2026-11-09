@@ -229,15 +229,15 @@ public class VpnRoutesTest {
         // range the tunnel announces must enter the VPN; the rest of CGNAT,
         // which belongs to the carrier, keeps bypassing it.
         List<IPUtil.CIDR> routes = VpnRoutes.getRoutes(
-                Arrays.asList("100.102.0.0/16", "10.20.0.0/24"));
+                Arrays.asList("100.90.0.0/16", "10.20.0.0/24"));
 
-        assertTrue(isRouted(routes, "100.102.79.78"));
-        assertTrue(isRouted(routes, "100.102.0.1"));
+        assertTrue(isRouted(routes, "100.90.10.20"));
+        assertTrue(isRouted(routes, "100.90.0.1"));
         assertTrue(isRouted(routes, "10.20.0.5"));
         assertTrue(isRouted(routes, "8.8.8.8"));
 
         assertFalse(isRouted(routes, "100.64.0.1"));
-        assertFalse(isRouted(routes, "100.103.0.1"));
+        assertFalse(isRouted(routes, "100.91.0.1"));
         assertFalse(isRouted(routes, "100.127.255.254"));
         assertFalse(isRouted(routes, "10.21.0.5"));
         assertFalse(isRouted(routes, "192.168.1.10"));
@@ -248,7 +248,7 @@ public class VpnRoutesTest {
         // A route broader than /10 (e.g. a full tunnel's 0.0.0.0/0 or 64.0.0.0/2)
         // does not pull the carrier's CGNAT space into the tunnel.
         List<IPUtil.CIDR> routes = VpnRoutes.getRoutes(Collections.singletonList("64.0.0.0/2"));
-        assertFalse(isRouted(routes, "100.102.79.78"));
+        assertFalse(isRouted(routes, "100.90.10.20"));
         assertTrue(isRouted(routes, "64.0.0.1"));
     }
 

@@ -189,7 +189,7 @@ object NetbirdEgress {
 
     /**
      * Routes du tunnel : celles annoncées par NetBird plus le réseau de l'overlay, déduit de
-     * l'adresse et de son préfixe (100.102.136.18/16 → 100.102.0.0/16). Sur Android, le
+     * l'adresse et de son préfixe (100.90.20.30/16 → 100.90.0.0/16). Sur Android, le
      * moteur ne met pas le réseau de l'overlay dans ses routes : sans lui, le trafic vers les
      * pairs ne passerait pas par le VPN.
      */
