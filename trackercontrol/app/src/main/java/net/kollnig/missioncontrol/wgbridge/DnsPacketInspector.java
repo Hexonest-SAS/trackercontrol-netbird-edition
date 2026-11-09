@@ -14,7 +14,7 @@ public final class DnsPacketInspector implements AutoCloseable {
 
     private long handle;
 
-    public DnsPacketInspector(WgDnsRecorder recorder) {
+    public DnsPacketInspector(DnsRecorder recorder) {
         handle = nativeNew(recorder);
     }
 
@@ -34,7 +34,7 @@ public final class DnsPacketInspector implements AutoCloseable {
         nativeFree(h);
     }
 
-    private static native long nativeNew(WgDnsRecorder recorder);
+    private static native long nativeNew(DnsRecorder recorder);
 
     private static native byte[] nativeInspect(long handle, byte[] packet);
 
