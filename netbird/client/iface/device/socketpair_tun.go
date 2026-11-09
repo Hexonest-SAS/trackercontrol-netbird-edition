@@ -59,6 +59,72 @@ func createTUNFromAdapterFD(fd int, mtu int) (wgbackend.TUN, string, error) {
 	return dev, socketpairTUNName, nil
 }
 
+// InboundDNSInspector sees each inbound DNS response before it reaches the
+// TUN, as TrackerControl's own transport does: it records name to address
+// mappings (tracker attribution) and may rewrite the packet. It returns the
+// packet to write, or nil to write the original unchanged.
+type InboundDNSInspector func(pkt []byte) []byte
+
+var inboundDNSInspector atomic.Pointer[InboundDNSInspector]
+
+// SetInboundDNSInspector installs the inspector for inbound DNS responses on
+// every socketpair device, or removes it when f is nil.
+func SetInboundDNSInspector(f InboundDNSInspector) {
+	if f == nil {
+		inboundDNSInspector.Store(nil)
+		return
+	}
+	inboundDNSInspector.Store(&f)
+}
+
+const dnsPort = 53
+
+// isDNSResponse reports whether pkt is a UDP or TCP segment from port 53.
+// IPv6 extension headers are not walked: DNS responses do not carry them.
+func isDNSResponse(pkt []byte) bool {
+	if len(pkt) < 1 {
+		return false
+	}
+	var proto byte
+	var l4 int
+	switch pkt[0] >> 4 {
+	case 4:
+		if len(pkt) < 20 {
+			return false
+		}
+		// A non-first fragment carries no transport header.
+		if (uint16(pkt[6]&0x1f)<<8 | uint16(pkt[7])) != 0 {
+			return false
+		}
+		proto, l4 = pkt[9], int(pkt[0]&0x0f)*4
+	case 6:
+		proto, l4 = 0, 40
+		if len(pkt) >= 40 {
+			proto = pkt[6]
+		}
+	default:
+		return false
+	}
+	if proto != unix.IPPROTO_UDP && proto != unix.IPPROTO_TCP {
+		return false
+	}
+	if l4 < 20 || len(pkt) < l4+2 {
+		return false
+	}
+	return uint16(pkt[l4])<<8|uint16(pkt[l4+1]) == dnsPort
+}
+
+func inspectInbound(pkt []byte) []byte {
+	f := inboundDNSInspector.Load()
+	if f == nil || !isDNSResponse(pkt) {
+		return pkt
+	}
+	if out := (*f)(pkt); out != nil {
+		return out
+	}
+	return pkt
+}
+
 // SocketpairTUN reads outbound IP packets, one per datagram, from rxFD and
 // writes inbound IP packets to txFD.
 type SocketpairTUN struct {
@@ -157,7 +223,7 @@ func (t *SocketpairTUN) Write(bufs [][]byte, offset int) (int, error) {
 	written := 0
 	var firstErr error
 	for _, buf := range bufs {
-		pkt := buf[offset:]
+		pkt := inspectInbound(buf[offset:])
 		for {
 			m, err := unix.Write(t.txFD, pkt)
 			if err == unix.EINTR {

@@ -13,3 +13,19 @@ import "github.com/netbirdio/netbird/client/iface/device"
 func SetSocketpairTunWriteFd(tunWriteFd int) {
 	device.SetSocketpairTunWriteFD(tunWriteFd)
 }
+
+// DNSInspector sees each inbound DNS response of the socketpair device before
+// it is written to the TUN. InspectInboundDNS returns the packet to write, or
+// null to keep the original.
+type DNSInspector interface {
+	InspectInboundDNS(packet []byte) []byte
+}
+
+// SetInboundDNSInspector installs the inspector, or removes it when nil.
+func SetInboundDNSInspector(inspector DNSInspector) {
+	if inspector == nil {
+		device.SetInboundDNSInspector(nil)
+		return
+	}
+	device.SetInboundDNSInspector(inspector.InspectInboundDNS)
+}

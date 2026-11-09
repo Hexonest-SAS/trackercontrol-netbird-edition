@@ -181,3 +181,80 @@ func TestCreateTUNFromAdapterFD_ConsumesPendingWriteFD(t *testing.T) {
 	_, _, err = createTUNFromAdapterFD(other, 1280)
 	assert.Error(t, err, "without a pending write fd the fd is opened as a real TUN")
 }
+
+// udpPacket builds a minimal IPv4 (or IPv6) UDP packet from sport to dport.
+func udpPacket(v6 bool, sport, dport uint16, payload []byte) []byte {
+	hdr := 20
+	if v6 {
+		hdr = 40
+	}
+	pkt := make([]byte, hdr+8+len(payload))
+	if v6 {
+		pkt[0] = 0x60
+		pkt[6] = unix.IPPROTO_UDP
+	} else {
+		pkt[0] = 0x45
+		pkt[9] = unix.IPPROTO_UDP
+	}
+	pkt[hdr], pkt[hdr+1] = byte(sport>>8), byte(sport)
+	pkt[hdr+2], pkt[hdr+3] = byte(dport>>8), byte(dport)
+	copy(pkt[hdr+8:], payload)
+	return pkt
+}
+
+func TestIsDNSResponse(t *testing.T) {
+	assert.True(t, isDNSResponse(udpPacket(false, 53, 40000, nil)), "IPv4 UDP from 53")
+	assert.True(t, isDNSResponse(udpPacket(true, 53, 40000, nil)), "IPv6 UDP from 53")
+	assert.False(t, isDNSResponse(udpPacket(false, 40000, 53, nil)), "a query is not a response")
+	assert.False(t, isDNSResponse(udpPacket(false, 443, 40000, nil)), "other port")
+
+	tcp := udpPacket(false, 53, 40000, make([]byte, 12))
+	tcp[9] = unix.IPPROTO_TCP
+	assert.True(t, isDNSResponse(tcp), "TCP from 53")
+
+	icmp := udpPacket(false, 53, 40000, nil)
+	icmp[9] = unix.IPPROTO_ICMP
+	assert.False(t, isDNSResponse(icmp), "ICMP")
+
+	frag := udpPacket(false, 53, 40000, nil)
+	frag[7] = 1
+	assert.False(t, isDNSResponse(frag), "non-first fragment")
+
+	assert.False(t, isDNSResponse([]byte{0x45, 0, 0}), "truncated header")
+	assert.False(t, isDNSResponse(nil), "empty")
+}
+
+func TestSocketpairTUN_WriteRunsDNSInspector(t *testing.T) {
+	dev, _, tunRead := newTestTUN(t)
+
+	var seen [][]byte
+	SetInboundDNSInspector(func(pkt []byte) []byte {
+		seen = append(seen, append([]byte(nil), pkt...))
+		if pkt[len(pkt)-1] == 0xbb {
+			return nil // keep as is
+		}
+		return pkt[:len(pkt)-1] // rewrite: drop the last byte
+	})
+	t.Cleanup(func() { SetInboundDNSInspector(nil) })
+
+	rewritten := udpPacket(false, 53, 40000, []byte{0xaa, 0xaa})
+	kept := udpPacket(true, 53, 40000, []byte{0xbb})
+	other := udpPacket(false, 443, 40000, []byte{0xcc})
+
+	n, err := dev.Write([][]byte{rewritten, kept, other}, 0)
+	require.NoError(t, err)
+	require.Equal(t, 3, n)
+
+	got := make([]byte, 1500)
+	m, err := unix.Read(tunRead, got)
+	require.NoError(t, err)
+	assert.Equal(t, rewritten[:len(rewritten)-1], got[:m], "the inspector's rewrite reaches the TUN")
+	m, err = unix.Read(tunRead, got)
+	require.NoError(t, err)
+	assert.Equal(t, kept, got[:m], "nil keeps the original packet")
+	m, err = unix.Read(tunRead, got)
+	require.NoError(t, err)
+	assert.Equal(t, other, got[:m], "non-DNS traffic is untouched")
+
+	assert.Len(t, seen, 2, "only DNS responses go to the inspector")
+}
