@@ -72,7 +72,7 @@ func (t *WGTunDevice) Create(routes []string, dns string, searchDomains []string
 		return nil, err
 	}
 
-	unmonitoredTUN, name, err := wgbackend.CreateUnmonitoredTUNFromFD(fd)
+	unmonitoredTUN, name, err := createTUNFromAdapterFD(fd, int(t.mtu))
 	if err != nil {
 		_ = unix.Close(fd)
 		log.Errorf("failed to create Android interface: %s", err)
@@ -119,7 +119,7 @@ func (t *WGTunDevice) RenewTun(fd int) error {
 		return fmt.Errorf("device not initialized")
 	}
 
-	unmonitoredTUN, _, err := wgbackend.CreateUnmonitoredTUNFromFD(fd)
+	unmonitoredTUN, _, err := createTUNFromAdapterFD(fd, int(t.mtu))
 	if err != nil {
 		_ = unix.Close(fd)
 		log.Errorf("failed to renew Android interface: %s", err)
