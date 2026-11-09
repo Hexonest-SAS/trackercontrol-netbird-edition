@@ -11,7 +11,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/scripts/env.sh"
 
-APP_ID=${1:-net.kollnig.missioncontrol.fdroid.test}
+APP_ID=${1:-fr.hexonest.trackernetbird.fdroid.test}
 OUT=${2:-$ROOT/build/netbird/netbird.aar}
 # minSdk de TrackerControl (app/build.gradle) : l'AAR ne doit pas exiger plus.
 ANDROID_API=23

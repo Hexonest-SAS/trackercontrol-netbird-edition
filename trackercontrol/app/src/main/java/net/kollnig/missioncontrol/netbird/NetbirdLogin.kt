@@ -125,8 +125,13 @@ object NetbirdLogin {
             Log.w(TAG, "reload", e)
         }
         Thread({
-            // Laisse le reload arreter le moteur avant de supprimer sa configuration.
-            try { Thread.sleep(1500) } catch (_: InterruptedException) {}
+            // Attend que le reload ait arrete le moteur (borne a 10 s) avant de supprimer sa config.
+            val deadline = System.currentTimeMillis() + 10_000
+            try {
+                while (NetbirdEgress.isRunning() && System.currentTimeMillis() < deadline)
+                    Thread.sleep(100)
+            } catch (_: InterruptedException) {}
+            if (NetbirdEgress.isRunning()) Log.w(TAG, "moteur NetBird encore actif, config supprimee quand meme")
             File(dir, "netbird.cfg").delete()
             File(dir, "state.json").delete()
         }, "netbird-logout").start()

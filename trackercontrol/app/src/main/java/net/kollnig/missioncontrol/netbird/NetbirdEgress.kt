@@ -175,9 +175,10 @@ object NetbirdEgress {
         }
         val dnsList = underlyingDnsList(ctx)
         val t = Thread({
+            var ownInspector: DnsPacketInspector? = null
             try {
                 Log.i(TAG, "moteur NetBird demarre")
-                installDnsInspector(ctx)
+                ownInspector = installDnsInspector(ctx)
                 c.runWithoutLogin(files, dnsList, object : DnsReadyListener {
                     override fun onReady() {}
                 }, Android.newEnvList())
@@ -186,7 +187,7 @@ object NetbirdEgress {
                 Log.e(TAG, "runWithoutLogin", e)
             } finally {
                 Log.i(TAG, "moteur NetBird arrete")
-                removeDnsInspector()
+                ownInspector?.let { removeDnsInspector(it) }
                 synchronized(lock) {
                     if (thread === Thread.currentThread()) tunConfigured = false
                 }
@@ -224,7 +225,7 @@ object NetbirdEgress {
         return list
     }
 
-    private fun installDnsInspector(ctx: Context) {
+    private fun installDnsInspector(ctx: Context): DnsPacketInspector {
         val vpn = synchronized(lock) { service }
         val recorder = object : DnsRecorder {
             override fun recordDns(qname: String, aname: String, resource: String, ttl: Int) {
@@ -239,12 +240,16 @@ object NetbirdEgress {
                 if (packet == null) null else inspector.inspect(packet)
         })
         old?.close()
+        return inspector
     }
 
-    private fun removeDnsInspector() {
-        val ins = synchronized(lock) { dnsInspector.also { dnsInspector = null } } ?: return
-        Android.setInboundDNSInspector(null)
-        ins.close()
+    /** Retire l'inspecteur seulement s'il est encore celui de ce moteur (un nouveau a pu le remplacer). */
+    private fun removeDnsInspector(own: DnsPacketInspector) {
+        val current = synchronized(lock) {
+            (dnsInspector === own).also { if (it) dnsInspector = null }
+        }
+        if (current) Android.setInboundDNSInspector(null)
+        own.close()
     }
 
     /** Arret idempotent. Ne tient jamais le verrou en attendant le thread du moteur. */

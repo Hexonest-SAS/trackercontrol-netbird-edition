@@ -43,7 +43,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId "net.kollnig.missioncontrol"
+        applicationId "fr.hexonest.trackernetbird"
         minSdk 23
         targetSdk 37
         //noinspection HighAppVersionCode
