@@ -160,7 +160,46 @@ object NetbirdEgress {
     /** Routes NetBird memorisees (separees par ";"), sans entree vide. */
     @JvmStatic
     fun storedRoutes(prefs: SharedPreferences): List<String> =
-        splitList(prefs.getString(PREF_ROUTES, ""))
+        effectiveRoutes(
+            prefs.getString(PREF_ROUTES, "") ?: "",
+            prefs.getString(PREF_ADDRESS, "") ?: "",
+            prefs.getString(PREF_ADDRESS6, "") ?: ""
+        )
+
+    /**
+     * Routes du tunnel : celles annoncées par NetBird plus le réseau de l'overlay, déduit de
+     * l'adresse et de son préfixe (100.102.136.18/16 → 100.102.0.0/16). Sur Android, le
+     * moteur ne met pas le réseau de l'overlay dans ses routes : sans lui, le trafic vers les
+     * pairs ne passerait pas par le VPN.
+     */
+    @JvmStatic
+    fun effectiveRoutes(routes: String, address: String, address6: String): List<String> {
+        val out = LinkedHashSet(splitList(routes))
+        for (a in listOf(address, address6)) networkOf(a)?.let { out.add(it) }
+        return out.toList()
+    }
+
+    /** Réseau d'une adresse CIDR (« ip/préfixe »), ou null si absente, invalide ou hôte seul. */
+    private val IPV4_LITERAL = Regex("""^\d{1,3}(\.\d{1,3}){3}$""")
+    private val IPV6_LITERAL = Regex("""^[0-9a-fA-F:]+$""")
+
+    @JvmStatic
+    fun networkOf(cidr: String): String? {
+        val parts = cidr.trim().split("/")
+        if (parts.size != 2) return null
+        val ip = parts[0]
+        // Littéraux seulement : InetAddress.getByName résoudrait un nom par DNS.
+        if (!IPV4_LITERAL.matches(ip) && !(ip.contains(':') && IPV6_LITERAL.matches(ip))) return null
+        val bytes = try { java.net.InetAddress.getByName(ip).address } catch (e: Exception) { return null }
+        val prefix = parts[1].toIntOrNull() ?: return null
+        if (prefix <= 0 || prefix >= bytes.size * 8) return null
+        for (i in bytes.indices) {
+            val keep = (prefix - i * 8).coerceIn(0, 8)
+            bytes[i] = (bytes[i].toInt() and (0xFF shl (8 - keep)) and 0xFF).toByte()
+        }
+        val net = java.net.InetAddress.getByAddress(bytes).hostAddress ?: return null
+        return "$net/$prefix"
+    }
 
     private fun splitList(s: String?): List<String> =
         (s ?: "").split(";").map { it.trim() }.filter { it.isNotEmpty() }
@@ -406,8 +445,8 @@ object NetbirdEgress {
         }
     }
 
-    private fun applyPolicy(routes: String) {
-        Wgbridge.setPolicyAllowedIps(splitList(routes).joinToString(";"))
+    private fun applyPolicy(routes: String, address: String, address6: String) {
+        Wgbridge.setPolicyAllowedIps(effectiveRoutes(routes, address, address6).joinToString(";"))
     }
 
     private val tunAdapter = object : TunAdapter {
@@ -426,7 +465,7 @@ object NetbirdEgress {
             val d = dns ?: ""
             val sd = searchDomains ?: ""
 
-            applyPolicy(r)
+            applyPolicy(r, a, a6)
 
             val p = prefs(ctx)
             val changed = p.getString(PREF_ADDRESS, "") != a ||
@@ -493,13 +532,23 @@ object NetbirdEgress {
     }
 
     private val networkListener = object : NetworkChangeListener {
-        override fun onNetworkChanged(routes: String?) {
-            val ctx = synchronized(lock) { service } ?: return
-            val r = routes ?: ""
-            try { applyPolicy(r) } catch (e: Throwable) { Log.w(TAG, "policy", e) }
+        // Sur Android le moteur passe "" : c'est un signal, les routes se relisent par
+        // GetTunSettings (comme le fait le client NetBird amont).
+        override fun onNetworkChanged(ignored: String?) {
+            val (ctx, c) = synchronized(lock) { service to client }
+            if (ctx == null || c == null) return
+            val settings = try { c.tunSettings } catch (e: Throwable) {
+                Log.w(TAG, "getTunSettings: ${e.message}")
+                return
+            }
+            val r = settings.routes ?: ""
+            val sd = settings.searchDomains ?: ""
             val p = prefs(ctx)
-            val changed = p.getString(PREF_ROUTES, "") != r
-            p.edit().putString(PREF_ROUTES, r).apply()
+            try {
+                applyPolicy(r, p.getString(PREF_ADDRESS, "") ?: "", p.getString(PREF_ADDRESS6, "") ?: "")
+            } catch (e: Throwable) { Log.w(TAG, "policy", e) }
+            val changed = p.getString(PREF_ROUTES, "") != r || p.getString(PREF_SEARCH_DOMAINS, "") != sd
+            p.edit().putString(PREF_ROUTES, r).putString(PREF_SEARCH_DOMAINS, sd).apply()
             if (changed) scheduleReload()
         }
 
