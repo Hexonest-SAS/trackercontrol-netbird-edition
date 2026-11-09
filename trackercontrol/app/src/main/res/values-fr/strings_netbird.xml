@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NetBird Edition : chaînes propres au fork, hors des fichiers d'origine pour fusionner l'amont sans conflit. -->
+<resources>
+    <string name="setting_netbird">NetBird</string>
+    <string name="setting_netbird_status">Statut</string>
+    <string name="setting_netbird_enabled">Utiliser NetBird</string>
+    <string name="summary_netbird_enabled">Fait passer le trafic par le moteur NetBird embarqué (remplace WireGuard)</string>
+    <string name="setting_netbird_management_url">URL du serveur de management</string>
+    <string name="msg_netbird_invalid_url">URL invalide : saisir une adresse du type https://netbird.exemple.fr:443</string>
+    <string name="summary_netbird_management_url">%1$s. Saisissez l\'adresse de votre propre serveur NetBird auto-hébergé pour l\'utiliser à la place.</string>
+    <string name="setting_netbird_login_key">Se connecter avec une clé d\'installation</string>
+    <string name="setting_netbird_login_sso">Se connecter par SSO</string>
+    <string name="setting_netbird_logout">Se déconnecter</string>
+    <string name="summary_netbird_logout">Désactive NetBird et supprime sa configuration</string>
+    <string name="summary_netbird_status_off">Désactivé</string>
+    <string name="summary_netbird_status_unconfigured">Non configuré</string>
+    <string name="summary_netbird_status_connected">Connecté (%1$s)</string>
+    <string name="summary_netbird_status_starting">Démarrage</string>
+    <string name="summary_netbird_status_error">Erreur : %1$s</string>
+    <string name="msg_netbird_setup_key_hint">Clé d\'installation</string>
+    <string name="msg_netbird_login_ok">NetBird : connecté</string>
+    <string name="msg_netbird_login_failed">Échec de la connexion NetBird : %1$s</string>
+    <string name="msg_netbird_no_browser">Aucun navigateur pour la connexion NetBird</string>
+    <string name="msg_netbird_user_code">Code NetBird : %1$s</string>
+    <string name="msg_netbird_logout_confirm">Se déconnecter de NetBird ? La configuration sera supprimée.</string>
+    <string name="msg_netbird_ok">OK</string>
+    <string name="msg_netbird_cancel">Annuler</string>
+
+    <string name="vpn_netbird_title">NetBird</string>
+    <string name="vpn_netbird_not_configured">Non configuré — connectez-vous depuis les réglages NetBird</string>
+    <string name="vpn_netbird_connecting">Connexion en cours…</string>
+    <string name="vpn_netbird_disconnected">Déconnecté</string>
+    <string name="vpn_netbird_connected">Connecté · %1$s · %2$d/%3$d pairs</string>
+    <string name="vpn_netbird_error">Erreur : %1$s</string>
+    <string name="vpn_netbird_settings">Réglages NetBird</string>
+    <string name="vpn_netbird_peer_connecting">connexion</string>
+    <string name="vpn_netbird_peer_idle">inactif</string>
+    <string name="vpn_netbird_peer_relayed">relais</string>
+    <string name="msg_netbird_relogin_title">NetBird : reconnexion nécessaire</string>
+    <string name="msg_netbird_relogin_detail">Ouvrez Réglages → NetBird pour vous reconnecter</string>
+    <string name="app_fork_notice">TrackerControl NetBird Edition est un fork non officiel de TrackerControl qui embarque le client NetBird. Il n\'est ni affilié aux projets TrackerControl et NetBird, ni approuvé par eux.\n\nLicence : GNU GPLv3 pour l\'ensemble de l\'œuvre. Les mentions de licence d\'origine sont conservées : TrackerControl est sous GPLv3, le client NetBird sous BSD-3-Clause.\n\nCode source : <a href="https://github.com/Hexonest-SAS/trackercontrol-netbird-edition">https://github.com/Hexonest-SAS/trackercontrol-netbird-edition</a></string>
+</resources>
