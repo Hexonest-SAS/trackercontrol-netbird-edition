@@ -235,6 +235,27 @@ pub extern "system" fn Java_net_kollnig_missioncontrol_wgbridge_Wgbridge_publicK
     })
 }
 
+/// Loads the split-tunnel prefixes of a tunnel run by another engine
+/// (NetBird) from a `;`-separated list, and returns how many were loaded. An
+/// invalid list clears them (fail-closed full tunnel) and throws.
+#[no_mangle]
+pub extern "system" fn Java_net_kollnig_missioncontrol_wgbridge_Wgbridge_setPolicyAllowedIps(
+    mut unowned_env: EnvUnowned,
+    _class: JClass,
+    prefixes: JString,
+) -> jint {
+    with_native_env!(unowned_env, env, {
+        let list = get_string(env, &prefixes).unwrap_or_default();
+        match crate::policy::set_allowed_ips_from_list(&list) {
+            Ok(n) => n as jint,
+            Err(e) => {
+                throw(env, &e);
+                -1
+            }
+        }
+    })
+}
+
 #[no_mangle]
 pub extern "system" fn Java_net_kollnig_missioncontrol_wgbridge_Wgbridge_nativeStartTunnel(
     mut unowned_env: EnvUnowned,

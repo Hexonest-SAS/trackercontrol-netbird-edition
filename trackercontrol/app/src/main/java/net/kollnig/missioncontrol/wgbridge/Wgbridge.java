@@ -25,6 +25,16 @@ public final class Wgbridge {
     public static native String publicKey(String privateKey);
 
     /**
+     * Loads the split-tunnel prefixes for a tunnel not run by gotatun (the
+     * NetBird engine), as a ";"-separated list such as NetBird's routes. An
+     * empty list, or null, restores the fail-closed full tunnel.
+     *
+     * @return the number of prefixes loaded
+     * @throws RuntimeException if an entry is invalid; the prefixes are then cleared
+     */
+    public static native int setPolicyAllowedIps(String prefixes);
+
+    /**
      * Boots gotatun.
      *
      * @param uapiConfig   UAPI text produced by WgConfig.toUapi()
