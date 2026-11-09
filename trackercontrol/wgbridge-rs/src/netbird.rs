@@ -50,10 +50,10 @@ mod tests {
 
     #[test]
     fn netbird_route_list_parses_into_split_prefixes() {
-        let parsed = parse_prefix_list("100.102.0.0/16; 10.20.0.0/24;;fd91:d072::/32;").unwrap();
-        assert_eq!(parsed, nets(&["100.102.0.0/16", "10.20.0.0/24", "fd91:d072::/32"]));
+        let parsed = parse_prefix_list("100.90.0.0/16; 10.20.0.0/24;;fd00:1234::/32;").unwrap();
+        assert_eq!(parsed, nets(&["100.90.0.0/16", "10.20.0.0/24", "fd00:1234::/32"]));
         let split = split_prefixes(&parsed);
-        assert!(tunnelled(&split, "100.102.79.78"), "a NetBird peer is tunnelled");
+        assert!(tunnelled(&split, "100.90.10.20"), "a NetBird peer is tunnelled");
         assert!(!tunnelled(&split, "1.1.1.1"), "Internet traffic leaves directly");
     }
 
@@ -61,7 +61,7 @@ mod tests {
     fn empty_or_invalid_route_list() {
         assert_eq!(parse_prefix_list("").unwrap(), Vec::<IpNetwork>::new());
         assert_eq!(parse_prefix_list(" ; ").unwrap(), Vec::<IpNetwork>::new());
-        assert!(parse_prefix_list("100.102.0.0/16;not-a-prefix").is_err());
-        assert!(parse_prefix_list("100.102.0.0/33").is_err());
+        assert!(parse_prefix_list("100.90.0.0/16;not-a-prefix").is_err());
+        assert!(parse_prefix_list("100.90.0.0/33").is_err());
     }
 }
