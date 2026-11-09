@@ -858,4 +858,26 @@ Sincerely,\n\n]]></string>
     <string name="log_connection_wifi">Wi-Fi</string>
     <string name="log_connection_other">Other network</string>
     <string name="log_screen_on">Screen on</string>
+    <string name="setting_netbird">NetBird</string>
+    <string name="setting_netbird_status">Status</string>
+    <string name="setting_netbird_enabled">Use NetBird</string>
+    <string name="summary_netbird_enabled">Route traffic through the embedded NetBird engine (replaces WireGuard)</string>
+    <string name="setting_netbird_management_url">Management server URL</string>
+    <string name="setting_netbird_login_key">Sign in with a setup key</string>
+    <string name="setting_netbird_login_sso">Sign in with SSO</string>
+    <string name="setting_netbird_logout">Sign out</string>
+    <string name="summary_netbird_logout">Disables NetBird and deletes its configuration</string>
+    <string name="summary_netbird_status_off">Off</string>
+    <string name="summary_netbird_status_unconfigured">Not configured</string>
+    <string name="summary_netbird_status_connected">Connected (%1$s)</string>
+    <string name="summary_netbird_status_starting">Starting</string>
+    <string name="summary_netbird_status_error">Error: %1$s</string>
+    <string name="msg_netbird_setup_key_hint">Setup key</string>
+    <string name="msg_netbird_login_ok">NetBird: signed in</string>
+    <string name="msg_netbird_login_failed">NetBird sign-in failed: %1$s</string>
+    <string name="msg_netbird_no_browser">No browser found for NetBird sign-in</string>
+    <string name="msg_netbird_user_code">NetBird code: %1$s</string>
+    <string name="msg_netbird_logout_confirm">Sign out of NetBird? The configuration will be deleted.</string>
+    <string name="msg_netbird_ok">OK</string>
+    <string name="msg_netbird_cancel">Cancel</string>
 </resources>

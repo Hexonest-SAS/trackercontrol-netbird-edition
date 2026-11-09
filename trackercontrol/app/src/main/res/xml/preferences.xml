@@ -231,6 +231,39 @@
     </PreferenceScreen>
 
     <PreferenceScreen
+        android:key="screen_netbird"
+        android:title="@string/setting_netbird">
+        <PreferenceCategory
+            android:key="category_netbird"
+            android:title="@string/setting_netbird">
+            <Preference
+                android:key="netbird_status"
+                android:summary="@string/summary_netbird_status_off"
+                android:title="@string/setting_netbird_status" />
+            <eu.faircode.netguard.SwitchPreference
+                android:defaultValue="false"
+                android:key="netbird_enabled"
+                android:summary="@string/summary_netbird_enabled"
+                android:title="@string/setting_netbird_enabled" />
+            <EditTextPreference
+                android:defaultValue="https://netbird.hexonest.fr"
+                android:inputType="textUri"
+                android:key="netbird_management_url"
+                android:title="@string/setting_netbird_management_url" />
+            <Preference
+                android:key="netbird_login_key"
+                android:title="@string/setting_netbird_login_key" />
+            <Preference
+                android:key="netbird_login_sso"
+                android:title="@string/setting_netbird_login_sso" />
+            <Preference
+                android:key="netbird_logout"
+                android:summary="@string/summary_netbird_logout"
+                android:title="@string/setting_netbird_logout" />
+        </PreferenceCategory>
+    </PreferenceScreen>
+
+    <PreferenceScreen
         android:key="screen_development"
         android:title="Development">
         <PreferenceCategory

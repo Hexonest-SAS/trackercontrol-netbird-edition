@@ -710,4 +710,26 @@ Cordialement,\n\n]]></string>
     <string name="log_connection_blocked">Bloqué</string>
     <string name="log_connection_other">Autre réseau</string>
     <string name="log_screen_on">Écran allumé</string>
+    <string name="setting_netbird">NetBird</string>
+    <string name="setting_netbird_status">Statut</string>
+    <string name="setting_netbird_enabled">Utiliser NetBird</string>
+    <string name="summary_netbird_enabled">Fait passer le trafic par le moteur NetBird embarqué (remplace WireGuard)</string>
+    <string name="setting_netbird_management_url">URL du serveur de management</string>
+    <string name="setting_netbird_login_key">Se connecter avec une clé d\'installation</string>
+    <string name="setting_netbird_login_sso">Se connecter par SSO</string>
+    <string name="setting_netbird_logout">Se déconnecter</string>
+    <string name="summary_netbird_logout">Désactive NetBird et supprime sa configuration</string>
+    <string name="summary_netbird_status_off">Désactivé</string>
+    <string name="summary_netbird_status_unconfigured">Non configuré</string>
+    <string name="summary_netbird_status_connected">Connecté (%1$s)</string>
+    <string name="summary_netbird_status_starting">Démarrage</string>
+    <string name="summary_netbird_status_error">Erreur : %1$s</string>
+    <string name="msg_netbird_setup_key_hint">Clé d\'installation</string>
+    <string name="msg_netbird_login_ok">NetBird : connecté</string>
+    <string name="msg_netbird_login_failed">Échec de la connexion NetBird : %1$s</string>
+    <string name="msg_netbird_no_browser">Aucun navigateur pour la connexion NetBird</string>
+    <string name="msg_netbird_user_code">Code NetBird : %1$s</string>
+    <string name="msg_netbird_logout_confirm">Se déconnecter de NetBird ? La configuration sera supprimée.</string>
+    <string name="msg_netbird_ok">OK</string>
+    <string name="msg_netbird_cancel">Annuler</string>
 </resources>

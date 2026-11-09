@@ -2,6 +2,8 @@ package net.kollnig.missioncontrol.netbird
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
 import android.os.Handler
@@ -11,6 +13,7 @@ import android.util.Log
 import androidx.preference.PreferenceManager
 import eu.faircode.netguard.ServiceSinkhole
 import io.netbird.gomobile.android.Android
+import io.netbird.gomobile.android.DNSInspector
 import io.netbird.gomobile.android.Client
 import io.netbird.gomobile.android.DNSList
 import io.netbird.gomobile.android.DnsReadyListener
@@ -18,6 +21,8 @@ import io.netbird.gomobile.android.IFaceDiscover
 import io.netbird.gomobile.android.NetworkChangeListener
 import io.netbird.gomobile.android.PlatformFiles
 import io.netbird.gomobile.android.TunAdapter
+import net.kollnig.missioncontrol.wgbridge.DnsPacketInspector
+import net.kollnig.missioncontrol.wgbridge.DnsRecorder
 import net.kollnig.missioncontrol.wgbridge.Wgbridge
 import java.io.File
 import java.net.NetworkInterface
@@ -56,6 +61,7 @@ object NetbirdEgress {
     private var stopSocketpairFn: (() -> Unit)? = null
     private var startSocketpairFn: (() -> Int)? = null
     private var tunConfigured = false
+    private var dnsInspector: DnsPacketInspector? = null
 
     @Volatile private var lastError: String? = null
 
@@ -167,10 +173,12 @@ object NetbirdEgress {
             override fun stateFilePath(): String = File(dir, "state.json").absolutePath
             override fun cacheDir(): String = ctx.cacheDir.absolutePath
         }
+        val dnsList = underlyingDnsList(ctx)
         val t = Thread({
             try {
                 Log.i(TAG, "moteur NetBird demarre")
-                c.runWithoutLogin(files, DNSList(), object : DnsReadyListener {
+                installDnsInspector(ctx)
+                c.runWithoutLogin(files, dnsList, object : DnsReadyListener {
                     override fun onReady() {}
                 }, Android.newEnvList())
             } catch (e: Throwable) {
@@ -178,6 +186,7 @@ object NetbirdEgress {
                 Log.e(TAG, "runWithoutLogin", e)
             } finally {
                 Log.i(TAG, "moteur NetBird arrete")
+                removeDnsInspector()
                 synchronized(lock) {
                     if (thread === Thread.currentThread()) tunConfigured = false
                 }
@@ -188,6 +197,54 @@ object NetbirdEgress {
             tunConfigured = false
         }
         t.start()
+    }
+
+    /** Serveurs DNS du reseau sous-jacent (hors VPN), sans l'adresse NetBird. */
+    private fun underlyingDnsList(ctx: Context): DNSList {
+        val list = DNSList()
+        try {
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val own = prefs(ctx).getString(PREF_ADDRESS, "").orEmpty().substringBefore("/")
+            val seen = LinkedHashSet<String>()
+            val nets = cm.allNetworks.sortedByDescending { it == cm.activeNetwork }
+            for (n in nets) {
+                val caps = cm.getNetworkCapabilities(n) ?: continue
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ||
+                    !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue
+                for (a in cm.getLinkProperties(n)?.dnsServers.orEmpty()) {
+                    val ip = a.hostAddress?.substringBefore("%") ?: continue
+                    if (ip != own) seen.add(ip)
+                }
+            }
+            for (ip in seen) list.add(ip)
+            Log.i(TAG, "DNS sous-jacents: ${seen.size}")
+        } catch (e: Throwable) {
+            Log.w(TAG, "DNS sous-jacents", e)
+        }
+        return list
+    }
+
+    private fun installDnsInspector(ctx: Context) {
+        val vpn = synchronized(lock) { service }
+        val recorder = object : DnsRecorder {
+            override fun recordDns(qname: String, aname: String, resource: String, ttl: Int) {
+                val s = vpn
+                if (s is ServiceSinkhole) s.wireGuardDnsResolved(qname, aname, resource, ttl)
+            }
+        }
+        val inspector = DnsPacketInspector(recorder)
+        val old = synchronized(lock) { dnsInspector.also { dnsInspector = inspector } }
+        Android.setInboundDNSInspector(object : DNSInspector {
+            override fun inspectInboundDNS(packet: ByteArray?): ByteArray? =
+                if (packet == null) null else inspector.inspect(packet)
+        })
+        old?.close()
+    }
+
+    private fun removeDnsInspector() {
+        val ins = synchronized(lock) { dnsInspector.also { dnsInspector = null } } ?: return
+        Android.setInboundDNSInspector(null)
+        ins.close()
     }
 
     /** Arret idempotent. Ne tient jamais le verrou en attendant le thread du moteur. */

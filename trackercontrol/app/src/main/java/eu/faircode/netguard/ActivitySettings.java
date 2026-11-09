@@ -360,6 +360,8 @@ public class ActivitySettings extends AppCompatActivity implements SharedPrefere
         if (pref != null)
             pref.setSummary(wgStatus);
 
+        configureNetbird(screen);
+
         // Show resolved
         Preference pref_show_resolved = screen.findPreference("show_resolved");
         if (pref_show_resolved != null) {
@@ -634,6 +636,7 @@ public class ActivitySettings extends AppCompatActivity implements SharedPrefere
         if (screen != null)
             configureWireGuardProfiles(screen, prefs);
         updateWireGuardStatus();
+        updateNetbirdStatus();
     }
 
     @Override
@@ -884,6 +887,15 @@ public class ActivitySettings extends AppCompatActivity implements SharedPrefere
             refreshResearchModeSummary();
             ServiceSinkhole.reload("changed " + name, this, false);
 
+        } else if (net.kollnig.missioncontrol.netbird.NetbirdEgress.PREF_ENABLED.equals(name)) {
+            updateNetbirdStatus();
+            refreshResearchModeSummary();
+            ServiceSinkhole.reload("changed " + name, this, false);
+
+        } else if (net.kollnig.missioncontrol.netbird.NetbirdLogin.PREF_MANAGEMENT_URL.equals(name)
+                || net.kollnig.missioncontrol.netbird.NetbirdEgress.PREF_ADDRESS.equals(name)) {
+            updateNetbirdStatus();
+
         } else if ("wg_keepalive_when_screen_off".equals(name)) {
             ServiceSinkhole.reload("changed " + name, this, false);
 
@@ -1060,6 +1072,83 @@ public class ActivitySettings extends AppCompatActivity implements SharedPrefere
         }
 
         return getString(R.string.summary_wg_status_starting);
+    }
+
+    private void configureNetbird(PreferenceScreen screen) {
+        Preference key = screen.findPreference("netbird_login_key");
+        if (key != null)
+            key.setOnPreferenceClickListener(p -> {
+                final android.widget.EditText input = new android.widget.EditText(this);
+                input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                        | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                input.setHint(R.string.msg_netbird_setup_key_hint);
+                new MaterialAlertDialogBuilder(this)
+                        .setTitle(R.string.setting_netbird_login_key)
+                        .setView(input)
+                        .setPositiveButton(R.string.msg_netbird_ok, (d, w) ->
+                                net.kollnig.missioncontrol.netbird.NetbirdLogin.INSTANCE
+                                        .loginWithSetupKey(this, input.getText().toString()))
+                        .setNegativeButton(R.string.msg_netbird_cancel, null)
+                        .show();
+                return true;
+            });
+        Preference sso = screen.findPreference("netbird_login_sso");
+        if (sso != null)
+            sso.setOnPreferenceClickListener(p -> {
+                net.kollnig.missioncontrol.netbird.NetbirdLogin.INSTANCE.loginWithSso(this);
+                return true;
+            });
+        Preference logout = screen.findPreference("netbird_logout");
+        if (logout != null)
+            logout.setOnPreferenceClickListener(p -> {
+                new MaterialAlertDialogBuilder(this)
+                        .setMessage(R.string.msg_netbird_logout_confirm)
+                        .setPositiveButton(R.string.msg_netbird_ok, (d, w) -> {
+                            net.kollnig.missioncontrol.netbird.NetbirdLogin.INSTANCE.logout(this);
+                            eu.faircode.netguard.SwitchPreference en = (eu.faircode.netguard.SwitchPreference)
+                                    getPreferenceScreen().findPreference("netbird_enabled");
+                            if (en != null) en.setChecked(false);
+                            updateNetbirdStatus();
+                        })
+                        .setNegativeButton(R.string.msg_netbird_cancel, null)
+                        .show();
+                return true;
+            });
+        updateNetbirdStatus();
+    }
+
+    private CharSequence getNetbirdStatusSummary(SharedPreferences prefs) {
+        if (!prefs.getBoolean(net.kollnig.missioncontrol.netbird.NetbirdEgress.PREF_ENABLED, false)) {
+            return new File(new File(getFilesDir(), "netbird"), "netbird.cfg").exists()
+                    ? getString(R.string.summary_netbird_status_off)
+                    : getString(R.string.summary_netbird_status_unconfigured);
+        }
+        String error = net.kollnig.missioncontrol.netbird.NetbirdEgress.INSTANCE.getLastError();
+        if (!TextUtils.isEmpty(error))
+            return getString(R.string.summary_netbird_status_error, error);
+        if (net.kollnig.missioncontrol.netbird.NetbirdEgress.INSTANCE.isRunning()) {
+            String addr = prefs.getString(net.kollnig.missioncontrol.netbird.NetbirdEgress.PREF_ADDRESS, "");
+            return TextUtils.isEmpty(addr) ? getString(R.string.summary_netbird_status_starting)
+                    : getString(R.string.summary_netbird_status_connected, addr);
+        }
+        return getString(R.string.summary_netbird_status_starting);
+    }
+
+    private void updateNetbirdStatus() {
+        PreferenceScreen screen = getPreferenceScreen();
+        if (screen == null)
+            return;
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        CharSequence summary = getNetbirdStatusSummary(prefs);
+        Preference pref = screen.findPreference("screen_netbird");
+        if (pref != null)
+            pref.setSummary(summary);
+        pref = screen.findPreference("netbird_status");
+        if (pref != null)
+            pref.setSummary(summary);
+        pref = screen.findPreference(net.kollnig.missioncontrol.netbird.NetbirdLogin.PREF_MANAGEMENT_URL);
+        if (pref != null)
+            pref.setSummary(net.kollnig.missioncontrol.netbird.NetbirdLogin.INSTANCE.managementUrl(this));
     }
 
     private void updateWireGuardStatus() {

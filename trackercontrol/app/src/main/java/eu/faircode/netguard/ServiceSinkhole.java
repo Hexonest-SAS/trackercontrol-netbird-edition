@@ -1905,15 +1905,38 @@ public class ServiceSinkhole extends VpnService {
             builder.addAddress(vpn6, 128);
         }
 
-        // TODO P4 : DNS NetBird (netbird_dns / netbird_search_domains) ; pour l'instant les
-        // serveurs DNS restent ceux de TrackerControl.
-        // DNS address
+        // DNS address. Avec NetBird, le résolveur du VPN est celui annoncé par NetBird
+        // (il relaie les domaines NetBird et les autres vers le DNS du réseau sous-jacent).
+        String nbDns = nbActive ? prefs.getString(net.kollnig.missioncontrol.netbird.NetbirdEgress.PREF_DNS, "") : "";
+        if (nbActive && !TextUtils.isEmpty(nbDns) && Util.isNumericAddress(nbDns.trim())) {
+            try {
+                dnsServers = new ArrayList<>();
+                dnsServers.add(InetAddress.getByName(nbDns.trim()));
+            } catch (Throwable ex) {
+                Log.w(TAG, "NetBird DNS ignored: " + ex);
+                dnsServers = null;
+            }
+        }
         if (dnsServers == null)
             dnsServers = getDns(ServiceSinkhole.this);
         for (InetAddress dns : dnsServers) {
             if (ip6 || dns instanceof Inet4Address) {
                 Log.i(TAG, "Using DNS=" + dns + (wgEnabled ? " (protected by WG)" : ""));
                 builder.addDnsServer(dns);
+            }
+        }
+
+        if (nbActive) {
+            String nbSearch = prefs.getString(net.kollnig.missioncontrol.netbird.NetbirdEgress.PREF_SEARCH_DOMAINS, "");
+            for (String sd : nbSearch.split(";")) {
+                sd = sd.trim();
+                if (sd.isEmpty()) continue;
+                try {
+                    Log.i(TAG, "Using NetBird search domain=" + sd);
+                    builder.addSearchDomain(sd);
+                } catch (Throwable ex) {
+                    Log.w(TAG, "addSearchDomain " + sd + ": " + ex);
+                }
             }
         }
 
