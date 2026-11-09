@@ -5,7 +5,7 @@ object NetbirdReconnect {
     const val BASE_DELAY_MS = 30_000L
     const val MAX_DELAY_MS = 5 * 60_000L
 
-    private val RELOGIN_MARKERS = listOf("permissiondenied", "unauthenticated", "login", "token")
+    private val RELOGIN_MARKERS = listOf("permissiondenied", "unauthenticated")
 
     /** Vrai si l'erreur indique une session a refaire (relancer le moteur serait inutile). */
     @JvmStatic

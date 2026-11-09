@@ -14,8 +14,6 @@ class NetbirdReconnectTest {
     fun sessionErrorsNeedRelogin() {
         assertTrue(NetbirdReconnect.needsRelogin("NetBird: rpc error: code = PermissionDenied desc = peer not found"))
         assertTrue(NetbirdReconnect.needsRelogin("NetBird: Unauthenticated"))
-        assertTrue(NetbirdReconnect.needsRelogin("NetBird: login failed"))
-        assertTrue(NetbirdReconnect.needsRelogin("invalid TOKEN"))
     }
 
     @Test
@@ -23,6 +21,10 @@ class NetbirdReconnectTest {
         assertFalse(NetbirdReconnect.needsRelogin(null))
         assertFalse(NetbirdReconnect.needsRelogin(""))
         assertFalse(NetbirdReconnect.needsRelogin("NetBird: connection refused"))
+        // The engine wraps network failures in "login failed": that is a retry, not a relogin
+        // (the engine itself only flags NeedsLogin on PermissionDenied).
+        assertFalse(NetbirdReconnect.needsRelogin("login failed: rpc error: code = Unavailable desc = connection refused"))
+        assertFalse(NetbirdReconnect.needsRelogin("NetBird: failed to get token info: context deadline exceeded"))
         assertFalse(NetbirdReconnect.needsRelogin("NetBird: context deadline exceeded"))
     }
 
