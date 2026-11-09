@@ -59,3 +59,28 @@ echo "sdk.dir=$HOME/Android/Sdk" > local.properties
 ./gradlew assembleFdroidDebug
 # APK : app/build/outputs/apk/fdroid/debug/
 ```
+
+## Installer sur le téléphone
+
+Signature : clé de debug de la machine de build (`~/.android/debug.keystore`, alias
+`androiddebugkey`, SHA-256 `dd2dcbbf…ef1fb1`). Décision D5 : on reste sur cette clé tant que
+l'app ne quitte pas le téléphone de Fabien. **Sauvegarder ce fichier** : sans lui, plus aucune
+mise à jour sur place n'est possible (Android refuse une signature différente).
+
+```sh
+# APK : build/apk/TrackerControl-NetBird-<commit>-debug.apk (copie de
+# trackercontrol/app/build/outputs/apk/fdroid/debug/TrackerControl-fdroidDebug-latest.apk)
+adb -s <téléphone> install -r build/apk/TrackerControl-NetBird-<commit>-debug.apk
+```
+
+- Toujours `install -r` (mise à jour sur place) : les données de l'app sont conservées, donc la
+  configuration NetBird (`files/netbird/netbird.cfg`) et sa clé WireGuard : le téléphone reste le
+  même pair NetBird. Ne jamais désinstaller ni `pm clear` : une nouvelle installation crée un
+  nouveau pair (doublon à supprimer dans l'interface NetBird).
+- Paquet : `fr.hexonest.trackernetbird.fdroid.test` (« TrackerControl NetBird »), installable à
+  côté de TrackerControl ; un seul VPN actif à la fois sous Android.
+- Vérification après mise à jour : `adb shell ip route get 100.102.79.78 uid <uid d'une app>`
+  doit passer par `tun*` avec l'adresse NetBird en source (le shell adb et l'app elle-même sont
+  exclus du VPN : leurs propres tests réseau ne prouvent rien).
+- Se connecter par SSO avec le VPN de l'app activé : sinon Android peut geler l'app pendant que
+  le navigateur est au premier plan et le retour de connexion échoue.
