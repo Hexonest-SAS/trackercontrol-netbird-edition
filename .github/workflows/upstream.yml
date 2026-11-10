@@ -105,6 +105,12 @@ jobs:
         if: steps.merge.outputs.status == 'updated' || inputs.force_build
         run: cargo install cargo-ndk@4.1.2 --locked
 
+      # Le build Gradle lance cargo en --offline (exigence F-Droid) : les crates
+      # doivent être en cache avant, comme le fait scripts/setup_rust_android.sh.
+      - name: Crates wgbridge-rs
+        if: steps.merge.outputs.status == 'updated' || inputs.force_build
+        run: cargo fetch --manifest-path trackercontrol/wgbridge-rs/Cargo.toml --locked
+
       - name: Moteur NetBird (AAR)
         if: steps.merge.outputs.status == 'updated' || inputs.force_build
         run: |
