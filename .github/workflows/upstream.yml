@@ -147,5 +147,12 @@ jobs:
             echo
             echo "Fusions \`git subtree --squash\` déjà passées par la compilation de l'AAR NetBird, les tests unitaires TrackerControl (fdroidDebug) et \`cargo test --lib\`. L'APK de l'exécution est joint en artefact : $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           } > "$RUNNER_TEMP/pr.md"
-          gh pr create --base main --head "$BRANCH" \
-            --title "Amont : $SUMMARY" --body-file "$RUNNER_TEMP/pr.md"
+          # La planification repasse chaque jour tant que la PR n'est pas fusionnée : une PR déjà
+          # ouverte sur cette branche est mise à jour (titre, description) au lieu d'échouer.
+          if [ "$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null)" = "OPEN" ]; then
+            gh pr edit "$BRANCH" --title "Amont : $SUMMARY" --body-file "$RUNNER_TEMP/pr.md"
+            echo "PR déjà ouverte pour $BRANCH : titre et description mis à jour."
+          else
+            gh pr create --base main --head "$BRANCH" \
+              --title "Amont : $SUMMARY" --body-file "$RUNNER_TEMP/pr.md"
+          fi
