@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { Events } from "@wailsio/runtime";
 import * as ScrollArea from "@radix-ui/react-scroll-area";
 import { cn } from "@/lib/cn";
@@ -13,6 +13,7 @@ import { SettingsNetwork } from "@/modules/settings/SettingsNetwork.tsx";
 import { SettingsSecurity } from "@/modules/settings/SettingsSecurity.tsx";
 import { ProfilesTab } from "@/modules/profiles/ProfilesTab.tsx";
 import { SettingsSSH } from "@/modules/settings/SettingsSSH.tsx";
+import { SettingsVNC } from "@/modules/settings/SettingsVNC.tsx";
 import { SettingsAdvanced } from "@/modules/settings/SettingsAdvanced.tsx";
 import { SettingsTroubleshooting } from "@/modules/settings/SettingsTroubleshooting.tsx";
 import { SettingsAbout } from "@/modules/settings/SettingsAbout.tsx";
@@ -27,10 +28,23 @@ const enum Tab {
     Security = "security",
     Profiles = "profiles",
     SSH = "ssh",
+    VNC = "vnc",
     Advanced = "advanced",
     Troubleshooting = "troubleshooting",
     About = "about",
 }
+
+// Tabs that render the daemon's profile configuration. Only these mount
+// SettingsProvider, so a profile whose configuration this user may not read
+// still leaves the rest of the page reachable.
+const CONFIG_TABS: ReadonlySet<Tab> = new Set([
+    Tab.General,
+    Tab.Network,
+    Tab.Security,
+    Tab.SSH,
+    Tab.VNC,
+    Tab.Advanced,
+]);
 
 const TAB_CONTENT: Record<Tab, ReactNode> = {
     [Tab.General]: <SettingsGeneral />,
@@ -38,15 +52,23 @@ const TAB_CONTENT: Record<Tab, ReactNode> = {
     [Tab.Security]: <SettingsSecurity />,
     [Tab.Profiles]: <ProfilesTab />,
     [Tab.SSH]: <SettingsSSH />,
+    [Tab.VNC]: <SettingsVNC />,
     [Tab.Advanced]: <SettingsAdvanced />,
     [Tab.Troubleshooting]: <SettingsTroubleshooting />,
     [Tab.About]: <SettingsAbout />,
 };
 
+// WithSettings reads the daemon's profile configuration for the tabs that need
+// it. Radix keeps only the active tab's content mounted, so gating on the active
+// tab is what keeps the read off the tabs that do not use it.
+const WithSettings = ({ enabled, children }: { enabled: boolean; children: ReactNode }) =>
+    enabled ? <SettingsProvider>{children}</SettingsProvider> : <>{children}</>;
+
 export const SettingsPage = () => {
     const dir = useDirection();
     const location = useLocation();
     const navState = location.state as { tab?: string } | null;
+    const [searchParams] = useSearchParams();
     const { mdm, features } = useRestrictions();
 
     const visibleTabs = useMemo<Tab[]>(() => {
@@ -57,15 +79,25 @@ export const SettingsPage = () => {
             [Tab.Security]: editable,
             [Tab.Profiles]: !features.disableProfiles,
             [Tab.SSH]: mdm.allowServerSSH ?? editable,
+            [Tab.VNC]: mdm.allowServerVNC ?? editable,
             [Tab.Advanced]: editable,
             [Tab.Troubleshooting]: true,
             [Tab.About]: true,
         };
         return (Object.keys(visibility) as Tab[]).filter((t) => visibility[t]);
-    }, [features.disableUpdateSettings, features.disableProfiles, mdm.allowServerSSH]);
+    }, [
+        features.disableUpdateSettings,
+        features.disableProfiles,
+        mdm.allowServerSSH,
+        mdm.allowServerVNC,
+    ]);
 
     const defaultTab = visibleTabs[0];
-    const [active, setActive] = useState<string>(() => navState?.tab ?? defaultTab);
+    // The window carries its tab in the URL, so the first render opens on the
+    // requested one rather than on the default and then correcting itself.
+    const [active, setActive] = useState<string>(
+        () => navState?.tab ?? searchParams.get("tab") ?? defaultTab,
+    );
 
     useEffect(() => {
         if (navState?.tab) setActive(navState.tab);
@@ -94,7 +126,7 @@ export const SettingsPage = () => {
                     <SettingsNavigation />
                     <AppRightPanel>
                         <AutostartSettingsProvider>
-                            <SettingsProvider>
+                            <WithSettings enabled={CONFIG_TABS.has(active as Tab)}>
                                 <ScrollArea.Root
                                     dir={dir}
                                     key={active}
@@ -124,7 +156,7 @@ export const SettingsPage = () => {
                                         />
                                     </ScrollArea.Scrollbar>
                                 </ScrollArea.Root>
-                            </SettingsProvider>
+                            </WithSettings>
                         </AutostartSettingsProvider>
                     </AppRightPanel>
                 </VerticalTabs>

@@ -85,6 +85,12 @@ var guardedFields = []guardedField{
 	boolField(FlagDisableSSHAuth, "Accept SSH sessions without authentication.",
 		func(p GuardedSettings) *bool { return p.DisableSSHAuth },
 		func(req *proto.SetConfigRequest, v *bool) { req.DisableSSHAuth = v }),
+	boolField(FlagAllowServerVNC, "Run the NetBird VNC server.",
+		func(p GuardedSettings) *bool { return p.ServerVNCAllowed },
+		func(req *proto.SetConfigRequest, v *bool) { req.ServerVNCAllowed = v }),
+	boolField(FlagDisableVNCApproval, "Accept VNC sessions without asking the console user.",
+		func(p GuardedSettings) *bool { return p.DisableVNCApproval },
+		func(req *proto.SetConfigRequest, v *bool) { req.DisableVNCApproval = v }),
 }
 
 // fieldValue is a flag that remembers whether it was given, and requires a value:
@@ -158,7 +164,7 @@ func IsPrivilegedSettingsRun(args []string) bool {
 func RunPrivilegedSettings(args []string, connect func(addr string) (proto.DaemonServiceClient, error)) int {
 	fs := flag.NewFlagSet("netbird-ui --"+FlagApplyPrivilegedSettings, flag.ContinueOnError)
 	fs.Bool(FlagApplyPrivilegedSettings, false, "Apply the settings the daemon restricts to root/administrator and exit.")
-	daemonAddr := fs.String(FlagDaemonAddr, "", "Daemon gRPC address: unix:///path, npipe://name or tcp://host:port")
+	daemonAddr := fs.String(FlagDaemonAddr, "", "Daemon gRPC address: unix:///path, npipe://name or tcp://host:port (deprecated)")
 	logLevel := fs.String(FlagLogLevel, "info", "Log level: trace|debug|info|warn|error.")
 	profile := fs.String(FlagProfile, "", "Profile to change.")
 	username := fs.String(FlagUser, "", "Owner of the profile.")

@@ -89,6 +89,10 @@ type Server struct {
 
 	reverseProxyManager rpservice.Manager
 	reverseProxyMu      sync.RWMutex
+
+	// draining makes ending sync streams of regular peers skip their disconnect write;
+	// the liveness controller's Release retires all of this instance's connections.
+	draining atomic.Bool
 }
 
 // NewServer creates a new Management server
@@ -311,7 +315,14 @@ func (s *Server) Sync(req *proto.EncryptedMessage, srv proto.ManagementService_S
 	metahash := metaHash(peerMeta)
 	s.loginFilter.addLogin(peerKey.String(), metahash)
 
-	peer, netMap, postureChecks, dnsFwdPort, err := s.accountManager.SyncAndMarkPeer(ctx, accountID, peerKey.String(), peerMeta, realIP, syncStart)
+	settings, err := s.settingsManager.GetSettings(ctx, accountID, activity.SystemInitiator)
+	if err != nil {
+		log.WithContext(ctx).Debugf("error while getting settings for peer %s: %v", peerKey.String(), err)
+		s.syncSem.Add(-1)
+		return status.Errorf(codes.Internal, "error handling request")
+	}
+
+	peer, netMap, postureChecks, dnsFwdPort, err := s.accountManager.SyncAndMarkPeer(ctx, accountID, peerKey.String(), peerMeta, realIP, syncStart, settings)
 	if err != nil {
 		log.WithContext(ctx).Debugf("error while syncing peer %s: %v", peerKey.String(), err)
 		s.syncSem.Add(-1)
@@ -319,11 +330,11 @@ func (s *Server) Sync(req *proto.EncryptedMessage, srv proto.ManagementService_S
 	}
 
 	trackChallenge := func() { s.accountManager.TrackCertificateChallenges(ctx, accountID, peer.ID, syncStart) }
-	err = s.sendInitialSync(ctx, peerKey, peer, netMap, postureChecks, srv, dnsFwdPort, trackChallenge)
+	err = s.sendInitialSync(ctx, peerKey, peer, netMap, postureChecks, srv, dnsFwdPort, settings, trackChallenge)
 	if err != nil {
 		log.WithContext(ctx).Debugf("error while sending initial sync for %s: %v", peerKey.String(), err)
 		s.syncSem.Add(-1)
-		s.cancelPeerRoutinesWithoutLock(ctx, accountID, peer, syncStart, nil)
+		s.cancelPeerRoutinesWithoutLock(context.WithoutCancel(ctx), accountID, peer, syncStart, nil)
 		return err
 	}
 
@@ -331,11 +342,18 @@ func (s *Server) Sync(req *proto.EncryptedMessage, srv proto.ManagementService_S
 	if err != nil {
 		log.WithContext(ctx).Debugf("error while notify peer connected for %s: %v", peerKey.String(), err)
 		s.syncSem.Add(-1)
-		s.cancelPeerRoutinesWithoutLock(ctx, accountID, peer, syncStart, nil)
+		s.cancelPeerRoutinesWithoutLock(context.WithoutCancel(ctx), accountID, peer, syncStart, nil)
 		return err
 	}
 
-	s.secretsManager.SetupRefresh(ctx, accountID, peer.ID)
+	if err = s.accountManager.CheckPeerMaySync(ctx, accountID, peerKey.String(), settings); err != nil {
+		log.WithContext(ctx).Debugf("peer %s may no longer sync after connecting: %v", peerKey.String(), err)
+		s.syncSem.Add(-1)
+		s.cancelPeerRoutinesWithoutLock(context.WithoutCancel(ctx), accountID, peer, syncStart, updates)
+		return mapError(ctx, err)
+	}
+
+	s.secretsManager.SetupRefresh(ctx, accountID, peer.ID, peerAuthKeys(peer))
 
 	unlock()
 	unlock = nil
@@ -442,6 +460,7 @@ func (s *Server) sendJob(ctx context.Context, peerKey wgtypes.Key, job *job.Even
 	return nil
 }
 
+// cancelPeerRoutines tears down the stream under the peer lock.
 func (s *Server) cancelPeerRoutines(ctx context.Context, accountID string, peer *nbpeer.Peer, streamStartTime time.Time, session chan *network_map.UpdateMessage) {
 	uncanceledCTX := context.WithoutCancel(ctx)
 	unlock := s.acquirePeerLockByUID(uncanceledCTX, peer.Key)
@@ -454,9 +473,11 @@ func (s *Server) cancelPeerRoutines(ctx context.Context, accountID string, peer 
 // and its updates channel. A nil session means the stream failed before it registered a channel;
 // the controller then closes any channel still registered.
 func (s *Server) cancelPeerRoutinesWithoutLock(ctx context.Context, accountID string, peer *nbpeer.Peer, streamStartTime time.Time, session chan *network_map.UpdateMessage) {
-	err := s.accountManager.OnPeerDisconnected(ctx, accountID, peer.Key, streamStartTime)
-	if err != nil {
-		log.WithContext(ctx).Errorf("failed to disconnect peer %s properly: %v", peer.Key, err)
+	if !s.skipDisconnectWrite(peer) {
+		err := s.accountManager.OnPeerDisconnected(ctx, accountID, peer.Key, streamStartTime)
+		if err != nil {
+			log.WithContext(ctx).Errorf("failed to disconnect peer %s properly: %v", peer.Key, err)
+		}
 	}
 	if !s.networkMapController.OnPeerDisconnected(ctx, accountID, peer.ID, session) {
 		log.WithContext(ctx).Debugf("skipped peer routines teardown for %s: a newer session owns the peer", peer.Key)
@@ -466,6 +487,18 @@ func (s *Server) cancelPeerRoutinesWithoutLock(ctx context.Context, accountID st
 	s.accountManager.UntrackCertificateChallenges(accountID, peer.ID, streamStartTime)
 
 	log.WithContext(ctx).Debugf("peer %s has been disconnected", peer.Key)
+}
+
+// skipDisconnectWrite reports whether the disconnect write of an ending stream is left to
+// the shutdown release of the liveness controller. Embedded proxy peers always write their
+// own because their disconnect refreshes the network maps of the peers using them.
+func (s *Server) skipDisconnectWrite(peer *nbpeer.Peer) bool {
+	return s.draining.Load() && !peer.ProxyMeta.Embedded
+}
+
+// StartDraining makes ending sync streams of regular peers skip their disconnect write.
+func (s *Server) StartDraining() {
+	s.draining.Store(true)
 }
 
 func (s *Server) validateToken(ctx context.Context, peerKey, jwtToken string) (string, error) {
@@ -594,6 +627,7 @@ func extractPeerMeta(ctx context.Context, meta *proto.PeerSystemMeta) nbpeer.Pee
 		SystemSerialNumber: cleanClientString(meta.GetSysSerialNumber()),
 		SystemProductName:  cleanClientString(meta.GetSysProductName()),
 		SystemManufacturer: cleanClientString(meta.GetSysManufacturer()),
+		SystemHardwareUUID: cleanClientString(meta.GetSysHardwareUUID()),
 		Environment: nbpeer.Environment{
 			Cloud:    cleanClientString(meta.GetEnvironment().GetCloud()),
 			Platform: cleanClientString(meta.GetEnvironment().GetPlatform()),
@@ -603,6 +637,7 @@ func extractPeerMeta(ctx context.Context, meta *proto.PeerSystemMeta) nbpeer.Pee
 			RosenpassPermissive:   meta.GetFlags().GetRosenpassPermissive(),
 			ServerSSHAllowed:      meta.GetFlags().GetServerSSHAllowed(),
 			RemoteJobsAllowed:     meta.GetFlags().GetRemoteJobsAllowed(),
+			ServerVNCAllowed:      meta.GetFlags().GetServerVNCAllowed(),
 			DisableClientRoutes:   meta.GetFlags().GetDisableClientRoutes(),
 			DisableServerRoutes:   meta.GetFlags().GetDisableServerRoutes(),
 			DisableDNS:            meta.GetFlags().GetDisableDNS(),
@@ -688,6 +723,7 @@ func (s *Server) Login(ctx context.Context, req *proto.EncryptedMessage) (*proto
 	//nolint
 	ctx = context.WithValue(ctx, nbContext.PeerIDKey, peerKey.String())
 	accountID, err := s.accountManager.GetAccountIDForPeerKey(ctx, peerKey.String())
+	accountKnown := err == nil
 	if err != nil {
 		// this case should not happen and already indicates an issue but we don't want the system to fail due to being unable to log in detail
 		accountID = "UNKNOWN"
@@ -714,14 +750,25 @@ func (s *Server) Login(ctx context.Context, req *proto.EncryptedMessage) (*proto
 		sshKey = loginReq.GetPeerKeys().GetSshPubKey()
 	}
 
+	var settings *types.Settings
+	if accountKnown {
+		settings, err = s.settingsManager.GetSettings(ctx, accountID, activity.SystemInitiator)
+		if err != nil {
+			log.WithContext(ctx).Warnf("failed getting settings for peer %s: %s", peerKey, err)
+			return nil, status.Errorf(codes.Internal, "failed logging in peer")
+		}
+	}
+
 	peer, network, postureChecks, enableSSH, err := s.accountManager.LoginPeer(ctx, types.PeerLogin{
 		WireGuardPubKey: peerKey.String(),
 		SSHKey:          cleanClientString(string(sshKey)),
+		AuthPubKey:      loginAuthPubKey(loginReq),
 		Meta:            peerMeta,
 		UserID:          userID,
 		SetupKey:        loginReq.GetSetupKey(),
 		ConnectionIP:    realIP,
 		ExtraDNSLabels:  loginReq.GetDnsLabels(),
+		Settings:        settings,
 	})
 	if err != nil {
 		if errors.Is(err, internalStatus.ErrNoAuthMethodProvided) {
@@ -732,7 +779,7 @@ func (s *Server) Login(ctx context.Context, req *proto.EncryptedMessage) (*proto
 		return nil, mapError(ctx, err)
 	}
 
-	loginResp, err := s.prepareLoginResponse(ctx, peer, network, postureChecks, enableSSH)
+	loginResp, err := s.prepareLoginResponse(ctx, peer, network, postureChecks, enableSSH, settings)
 	if err != nil {
 		log.WithContext(ctx).Warnf("failed preparing login response for peer %s: %s", peerKey, err)
 		return nil, status.Errorf(codes.Internal, "failed logging in peer")
@@ -837,20 +884,16 @@ func (s *Server) ExtendAuthSession(ctx context.Context, req *proto.EncryptedMess
 	}, nil
 }
 
-func (s *Server) prepareLoginResponse(ctx context.Context, peer *nbpeer.Peer, network *types.Network, postureChecks []*nmdata.PostureChecks, enableSSH bool) (*proto.LoginResponse, error) {
-	var relayToken *Token
+func (s *Server) prepareLoginResponse(ctx context.Context, peer *nbpeer.Peer, network *types.Network, postureChecks []*nmdata.PostureChecks, enableSSH bool, settings *types.Settings) (*proto.LoginResponse, error) {
 	var err error
-	if s.config.Relay != nil && len(s.config.Relay.Addresses) > 0 {
-		relayToken, err = s.secretsManager.GenerateRelayToken()
-		if err != nil {
-			log.Errorf("failed generating Relay token: %v", err)
-		}
-	}
+	relayToken, authToken := s.relayCredentials(ctx, peer)
 
-	settings, err := s.settingsManager.GetSettings(ctx, peer.AccountID, activity.SystemInitiator)
-	if err != nil {
-		log.WithContext(ctx).Warnf("failed getting settings for peer %s: %s", peer.Key, err)
-		return nil, status.Errorf(codes.Internal, "failed getting settings")
+	if settings == nil {
+		settings, err = s.settingsManager.GetSettings(ctx, peer.AccountID, activity.SystemInitiator)
+		if err != nil {
+			log.WithContext(ctx).Warnf("failed getting settings for peer %s: %s", peer.Key, err)
+			return nil, status.Errorf(codes.Internal, "failed getting settings")
+		}
 	}
 
 	// if peer has reached this point then it has logged in
@@ -859,6 +902,7 @@ func (s *Server) prepareLoginResponse(ctx context.Context, peer *nbpeer.Peer, ne
 		PeerConfig:    toPeerConfig(types.TwinPeer(peer), types.TwinNetwork(network), s.networkMapController.GetDNSDomain(settings), types.TwinAccountSettings(settings), s.config.HttpConfig, s.config.DeviceAuthorizationFlow, enableSSH, false),
 		Checks:        toProtocolChecks(ctx, postureChecks),
 	}
+	setAuthToken(loginResp.NetbirdConfig, authToken)
 
 	// settings is always non-nil here, so we never emit nil — encoder returns
 	// either a valid deadline or the explicit-zero "disabled" sentinel.
@@ -925,7 +969,7 @@ func (s *Server) IsHealthy(ctx context.Context, req *proto.Empty) (*proto.Empty,
 }
 
 // sendInitialSync sends initial proto.SyncResponse to the peer requesting synchronization
-func (s *Server) sendInitialSync(ctx context.Context, peerKey wgtypes.Key, peer *nbpeer.Peer, networkMap *types.NetworkMap, postureChecks []*nmdata.PostureChecks, srv proto.ManagementService_SyncServer, dnsFwdPort int64, onChallengeStamped func()) error {
+func (s *Server) sendInitialSync(ctx context.Context, peerKey wgtypes.Key, peer *nbpeer.Peer, networkMap *types.NetworkMap, postureChecks []*nmdata.PostureChecks, srv proto.ManagementService_SyncServer, dnsFwdPort int64, settings *types.Settings, onChallengeStamped func()) error {
 	var err error
 	var turnToken *Token
 
@@ -936,18 +980,7 @@ func (s *Server) sendInitialSync(ctx context.Context, peerKey wgtypes.Key, peer 
 		}
 	}
 
-	var relayToken *Token
-	if s.config.Relay != nil && len(s.config.Relay.Addresses) > 0 {
-		relayToken, err = s.secretsManager.GenerateRelayToken()
-		if err != nil {
-			log.Errorf("failed generating Relay token: %v", err)
-		}
-	}
-
-	settings, err := s.settingsManager.GetSettings(ctx, peer.AccountID, activity.SystemInitiator)
-	if err != nil {
-		return status.Errorf(codes.Internal, "error handling request")
-	}
+	relayToken, authToken := s.relayCredentials(ctx, peer)
 
 	peerGroups, err := s.accountManager.GetStore().GetPeerGroupIDs(ctx, store.LockingStrengthNone, peer.AccountID, peer.ID)
 	if err != nil {
@@ -991,6 +1024,8 @@ func (s *Server) sendInitialSync(ctx context.Context, peerKey wgtypes.Key, peer 
 	} else {
 		plainResp = ToSyncResponse(ctx, s.config, s.config.HttpConfig, s.config.DeviceAuthorizationFlow, types.TwinPeer(peer), turnToken, relayToken, networkMap, dnsName, postureChecks, nil, types.TwinAccountSettings(settings), settings.Extra, peerGroups, dnsFwdPort)
 	}
+
+	setAuthToken(plainResp.NetbirdConfig, authToken)
 
 	key, err := s.secretsManager.GetWGKey()
 	if err != nil {
