@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"io"
@@ -40,6 +41,13 @@ const (
 	receiveWatchdogInterval = 10 * time.Second
 	// defaultRegistrationTimeout bounds the wait for a new stream's registration header.
 	defaultRegistrationTimeout = 10 * time.Second
+	// defaultRegistrationProbeInterval is how often a new stream sends a
+	// self-addressed heartbeat while it waits for its registration header.
+	// Proxies such as AWS ALB withhold gRPC response headers until the first
+	// message. The heartbeat is repeated because one that reaches the server
+	// before the stream is registered is dropped, and spaced so a stream that
+	// waits out defaultRegistrationTimeout sends at most three.
+	defaultRegistrationProbeInterval = 3 * time.Second
 )
 
 // errReceiveStreamStalled is reported when the receive stream is transport-alive
@@ -95,7 +103,12 @@ type GrpcClient struct {
 	receiveHandoffBlocked atomic.Bool
 	watchdogWg            sync.WaitGroup
 
-	registrationTimeout time.Duration
+	registrationTimeout       time.Duration
+	registrationProbeInterval time.Duration
+
+	auth authCredentials
+	// cancelStream closes the current stream, guarded by mux.
+	cancelStream context.CancelFunc
 }
 
 // Option configures optional GrpcClient behavior.
@@ -106,17 +119,24 @@ func WithNetEvents(events *netevents.Manager) Option {
 	return func(c *GrpcClient) { c.netMgr = events }
 }
 
+// WithAuthKey sets the key that signs the proof presented with the auth token.
+func WithAuthKey(key ed25519.PrivateKey) Option {
+	return func(c *GrpcClient) { c.auth.key = key }
+}
+
 // NewClient creates a new Signal client
 func NewClient(ctx context.Context, addr string, key wgtypes.Key, tlsEnabled bool, opts ...Option) (*GrpcClient, error) {
 	// Options apply before dialing: the sweeper must wrap the first connection too.
 	c := &GrpcClient{
-		ctx:                   ctx,
-		key:                   key,
-		sharedKeys:            encryption.NewSharedKeyCache(key),
-		mux:                   sync.Mutex{},
-		status:                StreamDisconnected,
-		connStateCallbackLock: sync.RWMutex{},
-		registrationTimeout:   defaultRegistrationTimeout,
+		ctx:                       ctx,
+		key:                       key,
+		sharedKeys:                encryption.NewSharedKeyCache(key),
+		mux:                       sync.Mutex{},
+		status:                    StreamDisconnected,
+		connStateCallbackLock:     sync.RWMutex{},
+		registrationTimeout:       defaultRegistrationTimeout,
+		registrationProbeInterval: defaultRegistrationProbeInterval,
+		auth:                      authCredentials{hostname: signalHostname(addr)},
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -151,10 +171,12 @@ func NewClient(ctx context.Context, addr string, key wgtypes.Key, tlsEnabled boo
 }
 
 func (c *GrpcClient) StreamConnected() bool {
-	return c.status == StreamConnected
+	return c.GetStatus() == StreamConnected
 }
 
 func (c *GrpcClient) GetStatus() Status {
+	c.mux.Lock()
+	defer c.mux.Unlock()
 	return c.status
 }
 
@@ -168,6 +190,30 @@ func (c *GrpcClient) Close() error {
 	c.sharedKeys.Close()
 
 	return c.signalConn.Close()
+}
+
+// UpdateAuthToken sets the auth token presented on every Signal call from now on. An empty token
+// stops presenting one, as Management does when it issues no auth token. When a token appears or
+// is withdrawn the stream reconnects, since Signal records at registration whether the peer
+// authenticated: a legacy registration leaves the peer ID open to legacy callers, and an
+// authenticated one refuses the peer's own legacy calls.
+func (c *GrpcClient) UpdateAuthToken(token []byte) {
+	if !c.auth.update(token) {
+		return
+	}
+	c.mux.Lock()
+	cancel := c.cancelStream
+	c.mux.Unlock()
+	if cancel != nil {
+		log.Infof("auth token issued or withdrawn, reconnecting the Signal stream")
+		cancel()
+	}
+}
+
+func (c *GrpcClient) setCancelStream(cancel context.CancelFunc) {
+	c.mux.Lock()
+	defer c.mux.Unlock()
+	c.cancelStream = cancel
 }
 
 // SetConnStateListener set the ConnStateNotifier
@@ -235,6 +281,8 @@ func (c *GrpcClient) Receive(ctx context.Context, msgHandler func(msg *proto.Mes
 		// todo once the key rotation logic has been implemented, consider changing to some other identifier (received from management)
 		streamCtx, cancelStream := context.WithCancel(ctx)
 		defer cancelStream()
+		c.setCancelStream(cancelStream)
+		defer c.setCancelStream(nil)
 		stream, err := c.connect(streamCtx, cancelStream, c.key.PublicKey().String())
 		if err != nil {
 			log.Warnf("disconnected from the Signal Exchange due to an error: %v", err)
@@ -321,17 +369,54 @@ func (c *GrpcClient) connect(ctx context.Context, cancel context.CancelFunc, key
 
 	// add key fingerprint to the request header to be identified on the server side
 	md := metadata.New(map[string]string{proto.HeaderId: key})
+	authPairs, err := c.auth.metadataPairs(time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("auth credentials: %w", err)
+	}
+	for i := 0; i < len(authPairs); i += 2 {
+		md.Append(authPairs[i], authPairs[i+1])
+	}
 	metaCtx := metadata.NewOutgoingContext(ctx, md)
 	stream, err := c.realClient.ConnectStream(metaCtx, grpc.WaitForReady(true))
 	c.stream = stream
 	if err != nil {
 		return nil, err
 	}
+	stopProbes := c.probeUntilRegistered(ctx)
+	defer stopProbes()
 	if err := awaitRegistration(stream, c.registrationTimeout, cancel); err != nil {
 		return nil, err
 	}
 
 	return stream, nil
+}
+
+// probeUntilRegistered sends a self-addressed heartbeat every
+// registrationProbeInterval until the returned stop function is called. The
+// server forwards it onto this client's stream, so a proxy that holds the
+// registration header until the first message releases it.
+func (c *GrpcClient) probeUntilRegistered(ctx context.Context) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(c.registrationProbeInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := c.sendReceiveProbe(ctx); err != nil && ctx.Err() == nil {
+					log.Debugf("failed to send signal registration probe: %v", err)
+				}
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 func awaitRegistration(stream proto.SignalExchange_ConnectStreamClient, timeout time.Duration, cancel context.CancelFunc) error {
@@ -495,6 +580,14 @@ func (c *GrpcClient) send(parentCtx context.Context, msg *proto.Message) error {
 	encryptedMessage, err := c.encryptMessage(msg)
 	if err != nil {
 		return err
+	}
+
+	authPairs, err := c.auth.metadataPairs(time.Now())
+	if err != nil {
+		return fmt.Errorf("auth credentials: %w", err)
+	}
+	if len(authPairs) > 0 {
+		parentCtx = metadata.AppendToOutgoingContext(parentCtx, authPairs...)
 	}
 
 	attemptTimeout := client.ConnectTimeout

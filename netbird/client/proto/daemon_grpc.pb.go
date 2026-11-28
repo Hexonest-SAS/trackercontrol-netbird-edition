@@ -49,6 +49,7 @@ const (
 	DaemonService_AddProfile_FullMethodName                 = "/daemon.DaemonService/AddProfile"
 	DaemonService_RenameProfile_FullMethodName              = "/daemon.DaemonService/RenameProfile"
 	DaemonService_RemoveProfile_FullMethodName              = "/daemon.DaemonService/RemoveProfile"
+	DaemonService_ClaimProfile_FullMethodName               = "/daemon.DaemonService/ClaimProfile"
 	DaemonService_ListProfiles_FullMethodName               = "/daemon.DaemonService/ListProfiles"
 	DaemonService_GetActiveProfile_FullMethodName           = "/daemon.DaemonService/GetActiveProfile"
 	DaemonService_Logout_FullMethodName                     = "/daemon.DaemonService/Logout"
@@ -64,6 +65,7 @@ const (
 	DaemonService_StopCPUProfile_FullMethodName             = "/daemon.DaemonService/StopCPUProfile"
 	DaemonService_GetInstallerResult_FullMethodName         = "/daemon.DaemonService/GetInstallerResult"
 	DaemonService_ExposeService_FullMethodName              = "/daemon.DaemonService/ExposeService"
+	DaemonService_RespondApproval_FullMethodName            = "/daemon.DaemonService/RespondApproval"
 	DaemonService_WailsUIReady_FullMethodName               = "/daemon.DaemonService/WailsUIReady"
 )
 
@@ -132,6 +134,7 @@ type DaemonServiceClient interface {
 	AddProfile(ctx context.Context, in *AddProfileRequest, opts ...grpc.CallOption) (*AddProfileResponse, error)
 	RenameProfile(ctx context.Context, in *RenameProfileRequest, opts ...grpc.CallOption) (*RenameProfileResponse, error)
 	RemoveProfile(ctx context.Context, in *RemoveProfileRequest, opts ...grpc.CallOption) (*RemoveProfileResponse, error)
+	ClaimProfile(ctx context.Context, in *ClaimProfileRequest, opts ...grpc.CallOption) (*ClaimProfileResponse, error)
 	ListProfiles(ctx context.Context, in *ListProfilesRequest, opts ...grpc.CallOption) (*ListProfilesResponse, error)
 	GetActiveProfile(ctx context.Context, in *GetActiveProfileRequest, opts ...grpc.CallOption) (*GetActiveProfileResponse, error)
 	// Logout disconnects from the network and deletes the peer from the management server
@@ -169,6 +172,13 @@ type DaemonServiceClient interface {
 	GetInstallerResult(ctx context.Context, in *InstallerResultRequest, opts ...grpc.CallOption) (*InstallerResultResponse, error)
 	// ExposeService exposes a local port via the NetBird reverse proxy
 	ExposeService(ctx context.Context, in *ExposeServiceRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ExposeServiceEvent], error)
+	// RespondApproval delivers the user's accept/deny decision for a
+	// pending user-approval prompt. The daemon pushes the prompt as a
+	// SystemEvent with category APPROVAL and metadata key "request_id";
+	// the UI calls this RPC with the same request_id to unblock whichever
+	// subsystem (VNC, SSH, ...) is waiting. The "kind" metadata key tells
+	// the UI which subsystem the prompt belongs to.
+	RespondApproval(ctx context.Context, in *RespondApprovalRequest, opts ...grpc.CallOption) (*RespondApprovalResponse, error)
 	// WailsUIReady is a no-op probe the Wails UI calls once at startup. The UI
 	// only cares whether the daemon implements it: an Unimplemented response
 	// means the daemon predates this UI and is too old to drive it.
@@ -511,6 +521,16 @@ func (c *daemonServiceClient) RemoveProfile(ctx context.Context, in *RemoveProfi
 	return out, nil
 }
 
+func (c *daemonServiceClient) ClaimProfile(ctx context.Context, in *ClaimProfileRequest, opts ...grpc.CallOption) (*ClaimProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClaimProfileResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ClaimProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonServiceClient) ListProfiles(ctx context.Context, in *ListProfilesRequest, opts ...grpc.CallOption) (*ListProfilesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListProfilesResponse)
@@ -670,6 +690,16 @@ func (c *daemonServiceClient) ExposeService(ctx context.Context, in *ExposeServi
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DaemonService_ExposeServiceClient = grpc.ServerStreamingClient[ExposeServiceEvent]
 
+func (c *daemonServiceClient) RespondApproval(ctx context.Context, in *RespondApprovalRequest, opts ...grpc.CallOption) (*RespondApprovalResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RespondApprovalResponse)
+	err := c.cc.Invoke(ctx, DaemonService_RespondApproval_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonServiceClient) WailsUIReady(ctx context.Context, in *WailsUIReadyRequest, opts ...grpc.CallOption) (*WailsUIReadyResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WailsUIReadyResponse)
@@ -745,6 +775,7 @@ type DaemonServiceServer interface {
 	AddProfile(context.Context, *AddProfileRequest) (*AddProfileResponse, error)
 	RenameProfile(context.Context, *RenameProfileRequest) (*RenameProfileResponse, error)
 	RemoveProfile(context.Context, *RemoveProfileRequest) (*RemoveProfileResponse, error)
+	ClaimProfile(context.Context, *ClaimProfileRequest) (*ClaimProfileResponse, error)
 	ListProfiles(context.Context, *ListProfilesRequest) (*ListProfilesResponse, error)
 	GetActiveProfile(context.Context, *GetActiveProfileRequest) (*GetActiveProfileResponse, error)
 	// Logout disconnects from the network and deletes the peer from the management server
@@ -782,6 +813,13 @@ type DaemonServiceServer interface {
 	GetInstallerResult(context.Context, *InstallerResultRequest) (*InstallerResultResponse, error)
 	// ExposeService exposes a local port via the NetBird reverse proxy
 	ExposeService(*ExposeServiceRequest, grpc.ServerStreamingServer[ExposeServiceEvent]) error
+	// RespondApproval delivers the user's accept/deny decision for a
+	// pending user-approval prompt. The daemon pushes the prompt as a
+	// SystemEvent with category APPROVAL and metadata key "request_id";
+	// the UI calls this RPC with the same request_id to unblock whichever
+	// subsystem (VNC, SSH, ...) is waiting. The "kind" metadata key tells
+	// the UI which subsystem the prompt belongs to.
+	RespondApproval(context.Context, *RespondApprovalRequest) (*RespondApprovalResponse, error)
 	// WailsUIReady is a no-op probe the Wails UI calls once at startup. The UI
 	// only cares whether the daemon implements it: an Unimplemented response
 	// means the daemon predates this UI and is too old to drive it.
@@ -886,6 +924,9 @@ func (UnimplementedDaemonServiceServer) RenameProfile(context.Context, *RenamePr
 func (UnimplementedDaemonServiceServer) RemoveProfile(context.Context, *RemoveProfileRequest) (*RemoveProfileResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RemoveProfile not implemented")
 }
+func (UnimplementedDaemonServiceServer) ClaimProfile(context.Context, *ClaimProfileRequest) (*ClaimProfileResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClaimProfile not implemented")
+}
 func (UnimplementedDaemonServiceServer) ListProfiles(context.Context, *ListProfilesRequest) (*ListProfilesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListProfiles not implemented")
 }
@@ -930,6 +971,9 @@ func (UnimplementedDaemonServiceServer) GetInstallerResult(context.Context, *Ins
 }
 func (UnimplementedDaemonServiceServer) ExposeService(*ExposeServiceRequest, grpc.ServerStreamingServer[ExposeServiceEvent]) error {
 	return status.Error(codes.Unimplemented, "method ExposeService not implemented")
+}
+func (UnimplementedDaemonServiceServer) RespondApproval(context.Context, *RespondApprovalRequest) (*RespondApprovalResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RespondApproval not implemented")
 }
 func (UnimplementedDaemonServiceServer) WailsUIReady(context.Context, *WailsUIReadyRequest) (*WailsUIReadyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method WailsUIReady not implemented")
@@ -1474,6 +1518,24 @@ func _DaemonService_RemoveProfile_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_ClaimProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClaimProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ClaimProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ClaimProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ClaimProfile(ctx, req.(*ClaimProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DaemonService_ListProfiles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListProfilesRequest)
 	if err := dec(in); err != nil {
@@ -1737,6 +1799,24 @@ func _DaemonService_ExposeService_Handler(srv interface{}, stream grpc.ServerStr
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DaemonService_ExposeServiceServer = grpc.ServerStreamingServer[ExposeServiceEvent]
 
+func _DaemonService_RespondApproval_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RespondApprovalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).RespondApproval(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_RespondApproval_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).RespondApproval(ctx, req.(*RespondApprovalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DaemonService_WailsUIReady_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(WailsUIReadyRequest)
 	if err := dec(in); err != nil {
@@ -1871,6 +1951,10 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DaemonService_RemoveProfile_Handler,
 		},
 		{
+			MethodName: "ClaimProfile",
+			Handler:    _DaemonService_ClaimProfile_Handler,
+		},
+		{
 			MethodName: "ListProfiles",
 			Handler:    _DaemonService_ListProfiles_Handler,
 		},
@@ -1925,6 +2009,10 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetInstallerResult",
 			Handler:    _DaemonService_GetInstallerResult_Handler,
+		},
+		{
+			MethodName: "RespondApproval",
+			Handler:    _DaemonService_RespondApproval_Handler,
 		},
 		{
 			MethodName: "WailsUIReady",

@@ -8,9 +8,6 @@ import (
 	"strings"
 
 	log "github.com/sirupsen/logrus"
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
-	"google.golang.org/grpc/codes"
-	gstatus "google.golang.org/grpc/status"
 
 	"github.com/netbirdio/netbird/client/internal/daemonaddr"
 	"github.com/netbirdio/netbird/client/internal/ipcauth"
@@ -27,16 +24,25 @@ import (
 //     daemon's SSH server into a root (or unauthenticated) shell.
 //   - Enabling the SSH server at all is what makes the above reachable, and a
 //     profile the caller owns is not a privilege they hold.
-//   - While the SSH server is enabled, repointing the profile at another
-//     management identity hands SSH authorization decisions, including which
-//     keys and users are accepted, to whoever controls that identity. Changing
-//     the management URL and deregistering the peer are both ways to do that.
+//   - Enabling the VNC server exposes the console session, which on a
+//     multi-user host belongs to another user, and disabling its approval
+//     prompt removes that user's only say in it.
+//   - While a remote-access server (SSH or VNC) is enabled, repointing the
+//     profile at another management identity hands authorization decisions,
+//     including which keys and users are accepted, to whoever controls that
+//     identity. Changing the management URL and deregistering the peer are both
+//     ways to do that.
+//   - Unblocking inbound connections while a remote-access server is enabled
+//     starts that server: the engine keeps SSH and VNC down for as long as
+//     inbound traffic is blocked, so clearing the block is another way to hand
+//     out a shell or a desktop.
 //   - Binding the local metrics endpoint to a non-loopback address publishes
 //     peer names and connectivity state to the network without authentication.
 //
 // Everything else stays unauthenticated, so this is not an authorization model:
-// it only refuses the changes that would let a local user become root. A caller
-// whose identity cannot be established is refused as well.
+// it only refuses the changes that would let a local user become root, or reach
+// another user's desktop. A caller whose identity cannot be established is
+// refused as well.
 
 // privilegedConfigChange is the subset of a config request that crosses the
 // user-to-root boundary. Fields are nil or empty when the request leaves them
@@ -47,6 +53,9 @@ type privilegedConfigChange struct {
 	remoteJobsAllowed   *bool
 	enableSSHRoot       *bool
 	disableSSHAuth      *bool
+	serverVNCAllowed    *bool
+	disableVNCApproval  *bool
+	blockInbound        *bool
 	enableLocalMetrics  *bool
 	localMetricsAddress *string
 }
@@ -58,6 +67,9 @@ func privilegedChangeFromSetConfig(msg *proto.SetConfigRequest) privilegedConfig
 		remoteJobsAllowed:   msg.RemoteJobsAllowed,
 		enableSSHRoot:       msg.EnableSSHRoot,
 		disableSSHAuth:      msg.DisableSSHAuth,
+		serverVNCAllowed:    msg.ServerVNCAllowed,
+		disableVNCApproval:  msg.DisableVNCApproval,
+		blockInbound:        msg.BlockInbound,
 		enableLocalMetrics:  msg.EnableLocalMetrics,
 		localMetricsAddress: msg.LocalMetricsAddress,
 	}
@@ -70,6 +82,9 @@ func privilegedChangeFromLogin(msg *proto.LoginRequest) privilegedConfigChange {
 		remoteJobsAllowed:   msg.RemoteJobsAllowed,
 		enableSSHRoot:       msg.EnableSSHRoot,
 		disableSSHAuth:      msg.DisableSSHAuth,
+		serverVNCAllowed:    msg.ServerVNCAllowed,
+		disableVNCApproval:  msg.DisableVNCApproval,
+		blockInbound:        msg.BlockInbound,
 		enableLocalMetrics:  msg.EnableLocalMetrics,
 		localMetricsAddress: msg.LocalMetricsAddress,
 	}
@@ -104,42 +119,58 @@ func requirePrivilegeForConfigChange(ctx context.Context, stored *profilemanager
 		return denyPrivileged(ctx, "enabling remote jobs", ipcauth.UpCommand("--allow-remote-jobs"))
 	}
 
+	if err := requirePrivilegeForVNCChange(ctx, stored, change); err != nil {
+		return err
+	}
+
 	if addr, exposes := exposesLocalMetrics(stored, change); exposes {
 		return denyPrivileged(ctx,
 			"exposing the local metrics endpoint on a non-loopback address",
 			ipcauth.UpCommand("--enable-local-metrics --local-metrics-address "+addr))
 	}
 
-	// Only guard the management binding while the SSH server is enabled: that is
-	// when the management identity decides who may open a shell here.
-	if !sshServerEnabled(stored) {
+	// Only guard the management binding while a remote-access server is enabled:
+	// that is when the management identity decides who may open a shell or reach
+	// the desktop here.
+	server, enabled := enabledRemoteAccessServer(stored)
+	if !enabled {
 		return nil
 	}
 
 	if change.managementURL != "" && !sameManagementURL(stored.ManagementURL, change.managementURL) {
 		return denyPrivileged(ctx,
-			"changing the management URL while the NetBird SSH server is enabled",
+			fmt.Sprintf("changing the management URL while the NetBird %s server is enabled", server),
 			ipcauth.UpCommand("-m "+change.managementURL))
+	}
+
+	// The engine keeps a remote-access server down while inbound connections
+	// are blocked, so lifting the block on a profile that has one enabled
+	// starts it. That is the same privilege as enabling it in the first place.
+	if disables(storedBlockInbound(stored), change.blockInbound) {
+		return denyPrivileged(ctx,
+			fmt.Sprintf("unblocking inbound connections while the NetBird %s server is enabled", server),
+			ipcauth.UpCommand("--block-inbound=false"))
 	}
 
 	return nil
 }
 
 // requirePrivilegeForDeregistration refuses to deregister the peer from the
-// management server when the caller is not privileged and the profile has the
-// SSH server enabled. Deregistering frees the peer's key to be registered
-// against another management identity, which is the same handover the
+// management server when the caller is not privileged and the profile has a
+// remote-access server enabled. Deregistering frees the peer's key to be
+// registered against another management identity, which is the same handover the
 // management URL check refuses.
 //
 // Callers that treat deregistration as best-effort (profile removal) continue
 // without it; callers that were asked to deregister surface the error.
 func requirePrivilegeForDeregistration(ctx context.Context, cfg *profilemanager.Config) error {
-	if !sshServerEnabled(cfg) {
+	server, enabled := enabledRemoteAccessServer(cfg)
+	if !enabled {
 		return nil
 	}
 
 	return denyPrivileged(ctx,
-		"deregistering this peer while the NetBird SSH server is enabled",
+		fmt.Sprintf("deregistering this peer while the NetBird %s server is enabled", server),
 		ipcauth.ElevatedCommand("netbird logout"))
 }
 
@@ -154,7 +185,7 @@ func denyPrivileged(ctx context.Context, action, command string) error {
 	id, ok := ipcauth.CallerIdentity(ctx)
 	if !ok {
 		log.Warnf("denying %s: the caller's identity cannot be verified on this control channel", action)
-		return privilegeError(unidentifiedSummary(action), reinstallCommand())
+		return ipcauth.PrivilegeError(unidentifiedSummary(action), reinstallCommand())
 	}
 
 	if ipcauth.IsPrivilegedCaller(id) {
@@ -163,45 +194,8 @@ func denyPrivileged(ctx context.Context, action, command string) error {
 	}
 
 	log.Warnf("denying %s for unprivileged caller %s", action, id)
-	actor, command := requiredActor(command)
-	return privilegeError(privilegeSummary(action, actor), command)
-}
-
-// requiredActor names who may perform the operation and adjusts the command to
-// match. A daemon that is not itself privileged delegates to its own identity, so
-// telling that host's user to become root is wrong twice over: root is not what the
-// daemon checks for, and a rootless container has neither root nor sudo.
-func requiredActor(command string) (string, string) {
-	self, delegates := ipcauth.SelfDelegatesTo()
-	if !delegates {
-		return ipcauth.PrivilegedActor(), command
-	}
-	return fmt.Sprintf("the user the daemon runs as (%s)", self), strings.ReplaceAll(command, "sudo ", "")
-}
-
-// privilegeError builds the PermissionDenied carrying summary and command.
-func privilegeError(summary, command string) error {
-	st := gstatus.New(codes.PermissionDenied, fmt.Sprintf("%s\n\n%s", summary, command))
-
-	detailed, err := st.WithDetails(&errdetails.ErrorInfo{
-		Reason: ipcauth.ErrorReasonPrivilegeRequired,
-		Domain: ipcauth.ErrorDomain,
-		Metadata: map[string]string{
-			ipcauth.ErrorMetaSummary: summary,
-			ipcauth.ErrorMetaCommand: command,
-		},
-	})
-	if err != nil {
-		log.Debugf("attach privilege error detail: %v", err)
-		return st.Err()
-	}
-	return detailed.Err()
-}
-
-// privilegeSummary states what is refused and what it needs, in one sentence
-// that reads the same in a dialog and in a terminal.
-func privilegeSummary(action, actor string) string {
-	return fmt.Sprintf("%s requires %s.", capitalize(action), actor)
+	actor, command := ipcauth.RequiredActor(command)
+	return ipcauth.PrivilegeError(ipcauth.PrivilegeSummary(action, actor), command)
 }
 
 // unidentifiedSummary covers a control channel that carries no caller identity.
@@ -209,6 +203,15 @@ func privilegeSummary(action, actor string) string {
 func unidentifiedSummary(action string) string {
 	return fmt.Sprintf("%s requires %s, and the daemon cannot verify who is calling over its current socket. "+
 		"Reinstall the service on a socket that carries the caller's identity.", capitalize(action), ipcauth.PrivilegedActor())
+}
+
+// unidentifiableCallerSummary covers an operation that needs to know who is
+// asking rather than a privileged caller, so unlike unidentifiedSummary it does
+// not name root: elevating would not help, only moving the daemon onto a socket
+// that carries the caller's identity.
+func unidentifiableCallerSummary() string {
+	return "Answering a connection approval requires a control channel that carries the caller's identity, " +
+		"and the daemon's current socket does not. Reinstall the service on one that does."
 }
 
 // reinstallCommand is the command that moves the daemon onto a socket whose
@@ -235,6 +238,26 @@ func enables(stored, requested *bool) bool {
 		return false
 	}
 	return stored == nil || !*stored
+}
+
+// disables reports whether requested turns a flag off that is currently on. The
+// mirror of enables, for a flag whose privileged direction is being cleared.
+func disables(stored, requested *bool) bool {
+	if requested == nil || *requested {
+		return false
+	}
+	return stored != nil && *stored
+}
+
+// storedBlockInbound reads the inbound-block flag from the stored config. It
+// defaults to off, which is the engine's own default, so a config written
+// before the flag existed is not read as blocking.
+func storedBlockInbound(cfg *profilemanager.Config) *bool {
+	if cfg == nil {
+		return nil
+	}
+	blocked := cfg.BlockInbound
+	return &blocked
 }
 
 // storedFlag reads a flag from the stored config, tolerating a config that does
