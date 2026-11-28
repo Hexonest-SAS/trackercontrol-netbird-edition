@@ -72,6 +72,10 @@ func (l *Logger) Middleware(next http.Handler) http.Handler {
 		bytesUpload := bytesRead
 		bytesDownload := sw.bytesWritten
 
+		if capturedData.GetAgentNetwork() && sw.status >= http.StatusBadRequest {
+			capturedData.SetMetadata(proxy.MetaKeyErrorSource, capturedData.GetOrigin().ErrorSource())
+		}
+
 		entry := logEntry{
 			ID:            requestID,
 			ServiceID:     capturedData.GetServiceID(),
@@ -84,7 +88,7 @@ func (l *Logger) Middleware(next http.Handler) http.Handler {
 			SourceIP:      sourceIp,
 			AuthMechanism: capturedData.GetAuthMethod(),
 			UserID:        capturedData.GetUserID(),
-			AuthSuccess:   sw.status != http.StatusUnauthorized && sw.status != http.StatusForbidden,
+			AuthSuccess:   !authRefused(sw.status, capturedData.GetOrigin()),
 			BytesUpload:   bytesUpload,
 			BytesDownload: bytesDownload,
 			Protocol:      ProtocolHTTP,
@@ -110,4 +114,17 @@ func (l *Logger) Middleware(next http.Handler) http.Handler {
 		// Track usage for cost monitoring (upload + download) by domain
 		l.trackUsage(host, bytesUpload+bytesDownload)
 	})
+}
+
+// authRefused reports whether the proxy's access checks refused the request.
+// A private service refuses with 404 to hide itself, or 503 when management
+// cannot be asked, so those count as refusals only when auth answered them.
+func authRefused(status int, origin proxy.ResponseOrigin) bool {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return true
+	case http.StatusNotFound, http.StatusServiceUnavailable:
+		return origin == proxy.OriginAuth
+	}
+	return false
 }

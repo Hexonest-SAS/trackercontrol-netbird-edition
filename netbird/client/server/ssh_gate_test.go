@@ -38,24 +38,32 @@ var unprivUID = uint32(os.Geteuid() + 1)
 
 // The fabricated identities have to be shaped like the platform's: a uid says
 // nothing on Windows, and a zero uid there would read as root and be privileged.
+// withTarget is a request context as the gate leaves it: carrying the profile
+// the gate resolved and authorized out of the request's handle. A test that
+// calls a target-scoped handler directly supplies it, since the interceptor
+// that normally would is not in play.
+func withTarget(ctx context.Context, profilePath string) context.Context {
+	return ipcauth.ContextWithTarget(ctx, profilePath)
+}
+
 func rootCtx() context.Context { return ctxWithIdentity(privilegedIdentity()) }
 func userCtx() context.Context { return ctxWithIdentity(unprivilegedIdentity()) }
 
 func privilegedIdentity() ipcauth.Identity {
 	if runtime.GOOS == "windows" {
 		// LocalSystem, which is what the Windows service account is.
-		return ipcauth.Identity{SID: "S-1-5-18"}
+		return ipcauth.KnownForTest(ipcauth.Identity{SID: "S-1-5-18"})
 	}
-	return ipcauth.Identity{UID: 0}
+	return ipcauth.KnownForTest(ipcauth.Identity{UID: 0})
 }
 
 func unprivilegedIdentity() ipcauth.Identity {
 	if runtime.GOOS == "windows" {
 		// A plain user SID: no groups, so no BUILTIN\Administrators, and not
 		// elevated.
-		return ipcauth.Identity{SID: "S-1-5-21-1-2-3-1001"}
+		return ipcauth.KnownForTest(ipcauth.Identity{SID: "S-1-5-21-1-2-3-1001"})
 	}
-	return ipcauth.Identity{UID: unprivUID, GID: unprivUID}
+	return ipcauth.KnownForTest(ipcauth.Identity{UID: unprivUID, GID: unprivUID})
 }
 func noIdentityCtx() context.Context { return context.Background() }
 
@@ -472,3 +480,73 @@ func TestRequirePrivilegeForDeregistration(t *testing.T) {
 // directly have no transport credentials, and the privileged-change gate refuses
 // a caller it cannot identify.
 func privilegedTestCtx() context.Context { return rootCtx() }
+
+// The engine keeps SSH and VNC down while inbound connections are blocked, so
+// clearing that block on a profile with one enabled starts the server. An
+// unprivileged caller must not be able to do it by that route either.
+func TestRequirePrivilegeForConfigChange_UnblockInbound(t *testing.T) {
+	tests := []struct {
+		name       string
+		stored     *profilemanager.Config
+		change     privilegedConfigChange
+		privileged bool
+		wantDeny   bool
+	}{
+		{
+			name:     "clearing the block with the SSH server enabled",
+			stored:   &profilemanager.Config{ServerSSHAllowed: boolPtr(true), BlockInbound: true},
+			change:   privilegedConfigChange{blockInbound: boolPtr(false)},
+			wantDeny: true,
+		},
+		{
+			name: "clearing the block with only the VNC server enabled",
+			stored: &profilemanager.Config{
+				ServerSSHAllowed: boolPtr(false),
+				ServerVNCAllowed: boolPtr(true),
+				BlockInbound:     true,
+			},
+			change:   privilegedConfigChange{blockInbound: boolPtr(false)},
+			wantDeny: true,
+		},
+		{
+			name:       "an administrator may clear it",
+			stored:     &profilemanager.Config{ServerSSHAllowed: boolPtr(true), BlockInbound: true},
+			change:     privilegedConfigChange{blockInbound: boolPtr(false)},
+			privileged: true,
+		},
+		{
+			name:   "restating the stored block is not a change",
+			stored: &profilemanager.Config{ServerSSHAllowed: boolPtr(true), BlockInbound: true},
+			change: privilegedConfigChange{blockInbound: boolPtr(true)},
+		},
+		{
+			name:   "turning the block on is never privileged",
+			stored: &profilemanager.Config{ServerSSHAllowed: boolPtr(true), BlockInbound: false},
+			change: privilegedConfigChange{blockInbound: boolPtr(true)},
+		},
+		{
+			name: "with no remote-access server enabled it is the user's own business",
+			stored: &profilemanager.Config{
+				ServerSSHAllowed: boolPtr(false),
+				ServerVNCAllowed: boolPtr(false),
+				BlockInbound:     true,
+			},
+			change: privilegedConfigChange{blockInbound: boolPtr(false)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := userCtx()
+			if tt.privileged {
+				ctx = rootCtx()
+			}
+			err := requirePrivilegeForConfigChange(ctx, tt.stored, tt.change)
+			if tt.wantDeny {
+				assertDenied(t, err)
+				return
+			}
+			assertAllowed(t, err)
+		})
+	}
+}

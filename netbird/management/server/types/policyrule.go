@@ -1,7 +1,7 @@
 package types
 
 import (
-	"slices"
+	"github.com/netbirdio/netbird/management/server/util"
 )
 
 // PolicyUpdateOperationType operation type
@@ -59,6 +59,19 @@ type PolicyRule struct {
 
 	// AuthorizedUser is a list of userIDs that are authorized to access local resources via ssh
 	AuthorizedUser string
+
+	// SessionPubKey is the base64 X25519 public key used with Noise_IK to
+	// bind a VNC session to the AuthorizedUser. Set together with
+	// AuthorizedUser when the rule was created via temporary-access for a
+	// VNC scope; empty otherwise.
+	SessionPubKey string
+
+	// SessionDisplayName is a human-readable label for the user the
+	// SessionPubKey was issued to (typically display name, falling back
+	// to email or user id). The daemon surfaces it on the host's
+	// per-connection approval prompt so the user being asked can
+	// recognise who is requesting access.
+	SessionDisplayName string
 }
 
 // Copy returns a copy of a policy rule
@@ -80,6 +93,8 @@ func (pm *PolicyRule) Copy() *PolicyRule {
 		PortRanges:          make([]RulePortRange, len(pm.PortRanges)),
 		AuthorizedGroups:    make(map[string][]string, len(pm.AuthorizedGroups)),
 		AuthorizedUser:      pm.AuthorizedUser,
+		SessionPubKey:       pm.SessionPubKey,
+		SessionDisplayName:  pm.SessionDisplayName,
 	}
 	copy(rule.Destinations, pm.Destinations)
 	copy(rule.Sources, pm.Sources)
@@ -107,76 +122,17 @@ func (pm *PolicyRule) Equal(other *PolicyRule) bool {
 		pm.Protocol != other.Protocol ||
 		pm.SourceResource != other.SourceResource ||
 		pm.DestinationResource != other.DestinationResource ||
-		pm.AuthorizedUser != other.AuthorizedUser {
+		pm.AuthorizedUser != other.AuthorizedUser ||
+		pm.SessionPubKey != other.SessionPubKey ||
+		pm.SessionDisplayName != other.SessionDisplayName {
 		return false
 	}
 
-	if !stringSlicesEqualUnordered(pm.Sources, other.Sources) {
-		return false
-	}
-	if !stringSlicesEqualUnordered(pm.Destinations, other.Destinations) {
-		return false
-	}
-	if !stringSlicesEqualUnordered(pm.Ports, other.Ports) {
-		return false
-	}
-	if !portRangeSlicesEqualUnordered(pm.PortRanges, other.PortRanges) {
-		return false
-	}
-	if !authorizedGroupsEqual(pm.AuthorizedGroups, other.AuthorizedGroups) {
-		return false
-	}
-
-	return true
-}
-
-func stringSlicesEqualUnordered(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	if len(a) == 0 {
-		return true
-	}
-	sorted1 := make([]string, len(a))
-	sorted2 := make([]string, len(b))
-	copy(sorted1, a)
-	copy(sorted2, b)
-	slices.Sort(sorted1)
-	slices.Sort(sorted2)
-	return slices.Equal(sorted1, sorted2)
-}
-
-func portRangeSlicesEqualUnordered(a, b []RulePortRange) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	if len(a) == 0 {
-		return true
-	}
-	cmp := func(x, y RulePortRange) int {
-		if x.Start != y.Start {
-			if x.Start < y.Start {
-				return -1
-			}
-			return 1
-		}
-		if x.End != y.End {
-			if x.End < y.End {
-				return -1
-			}
-			return 1
-		}
-		return 0
-	}
-	sorted1 := make([]RulePortRange, len(a))
-	sorted2 := make([]RulePortRange, len(b))
-	copy(sorted1, a)
-	copy(sorted2, b)
-	slices.SortFunc(sorted1, cmp)
-	slices.SortFunc(sorted2, cmp)
-	return slices.EqualFunc(sorted1, sorted2, func(x, y RulePortRange) bool {
-		return x.Start == y.Start && x.End == y.End
-	})
+	return util.ElementsMatch(pm.Sources, other.Sources) &&
+		util.ElementsMatch(pm.Destinations, other.Destinations) &&
+		util.ElementsMatch(pm.Ports, other.Ports) &&
+		util.ElementsMatch(pm.PortRanges, other.PortRanges) &&
+		authorizedGroupsEqual(pm.AuthorizedGroups, other.AuthorizedGroups)
 }
 
 func authorizedGroupsEqual(a, b map[string][]string) bool {
@@ -185,10 +141,7 @@ func authorizedGroupsEqual(a, b map[string][]string) bool {
 	}
 	for k, va := range a {
 		vb, ok := b[k]
-		if !ok {
-			return false
-		}
-		if !stringSlicesEqualUnordered(va, vb) {
+		if !ok || !util.ElementsMatch(va, vb) {
 			return false
 		}
 	}

@@ -2,7 +2,10 @@ package profilemanager
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -20,6 +23,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/netbirdio/netbird/client/iface"
+	"github.com/netbirdio/netbird/client/internal/ipcauth"
 	"github.com/netbirdio/netbird/client/internal/routemanager/dynamic"
 	"github.com/netbirdio/netbird/client/mdm"
 	"github.com/netbirdio/netbird/client/ssh"
@@ -66,6 +70,8 @@ type ConfigInput struct {
 	PreSharedKey                  *string
 	ServerSSHAllowed              *bool
 	RemoteJobsAllowed             *bool
+	ServerVNCAllowed              *bool
+	DisableVNCApproval            *bool
 	EnableSSHRoot                 *bool
 	EnableSSHSFTP                 *bool
 	EnableSSHLocalPortForwarding  *bool
@@ -102,6 +108,11 @@ type ConfigInput struct {
 
 	LocalMetricsEnabled *bool
 	LocalMetricsAddress *string
+
+	// Name is the profile's display name, independent of the on-disk
+	// filename. Empty leaves the stored name unchanged.
+	Name  string
+	Owner *ipcauth.Identity
 }
 
 // Config Configuration type
@@ -123,6 +134,8 @@ type Config struct {
 	RosenpassPermissive           bool
 	ServerSSHAllowed              *bool
 	RemoteJobsAllowed             *bool
+	ServerVNCAllowed              *bool
+	DisableVNCApproval            *bool
 	EnableSSHRoot                 *bool
 	EnableSSHSFTP                 *bool
 	EnableSSHLocalPortForwarding  *bool
@@ -150,6 +163,10 @@ type Config struct {
 
 	// SSHKey is a private SSH key in a PEM format
 	SSHKey string
+
+	// AuthKey is the base64 Ed25519 seed the peer signs its Signal and Relay proofs with.
+	// It is regenerated together with PrivateKey.
+	AuthKey string
 
 	// ExternalIP mappings, if different from the host interface IP
 	//
@@ -217,6 +234,8 @@ type Config struct {
 	// state via Policy() and the mdm.Policy API (HasKey, ManagedKeys,
 	// IsEmpty).
 	policy *mdm.Policy `json:"-"`
+
+	Owners []string
 }
 
 // ApplyMDMPolicy overlays the supplied MDM Policy on top of the current
@@ -285,7 +304,7 @@ func baseConfigDir() (string, error) {
 	return os.UserConfigDir()
 }
 
-func getConfigDirForUser(username string) (string, error) {
+func getConfigDirForUserLegacy(username string) (string, error) {
 	if ConfigDirOverride != "" {
 		return ConfigDirOverride, nil
 	}
@@ -364,6 +383,8 @@ func (config *Config) resolveUnsetDefaults() (updated bool) {
 		// Remote jobs are an explicit opt-in: unlike SSH, a pre-existing config
 		// with no value defaults to disabled rather than being turned on.
 		&config.RemoteJobsAllowed,
+		&config.ServerVNCAllowed,
+		&config.DisableVNCApproval,
 	} {
 		if *field == nil {
 			*field = util.False()
@@ -456,6 +477,17 @@ func (config *Config) EnsureIdentity() (bool, error) {
 	if config.PrivateKey == "" {
 		log.Infof("generated new Wireguard key")
 		config.PrivateKey = generateKey()
+		config.AuthKey = ""
+		generated = true
+	}
+
+	if _, err := config.AuthSigningKey(); err != nil {
+		log.Infof("generated new peer auth key")
+		key, err := generateAuthKey()
+		if err != nil {
+			return generated, err
+		}
+		config.AuthKey = key
 		generated = true
 	}
 
@@ -472,9 +504,40 @@ func (config *Config) EnsureIdentity() (bool, error) {
 	return generated, nil
 }
 
+// AuthSigningKey returns the key the peer signs its Signal and Relay proofs with.
+func (config *Config) AuthSigningKey() (ed25519.PrivateKey, error) {
+	seed, err := base64.StdEncoding.DecodeString(config.AuthKey)
+	if err != nil {
+		return nil, fmt.Errorf("decode auth key: %w", err)
+	}
+	if len(seed) != ed25519.SeedSize {
+		return nil, fmt.Errorf("auth key size %d", len(seed))
+	}
+	return ed25519.NewKeyFromSeed(seed), nil
+}
+
+// ManagementAuthKeyOption sends the auth public key on login. A profile without a usable auth
+// key logs in without one and keeps the legacy Signal and Relay credentials.
+func (config *Config) ManagementAuthKeyOption() mgm.Option {
+	if config == nil || config.AuthKey == "" {
+		log.Debugf("no peer auth key, logging in without it")
+		return mgm.WithAuthKey(nil)
+	}
+	key, err := config.AuthSigningKey()
+	if err != nil {
+		log.Warnf("peer auth key unusable, logging in without it: %v", err)
+		return mgm.WithAuthKey(nil)
+	}
+	return mgm.WithAuthKey(key.Public().(ed25519.PublicKey))
+}
+
 func (config *Config) apply(input ConfigInput) (updated bool, err error) {
-	if config.Name != "" {
-		sanitized, err := sanitizeDisplayName(config.Name)
+	name := config.Name
+	if input.Name != "" {
+		name = input.Name
+	}
+	if name != "" {
+		sanitized, err := sanitizeDisplayName(name)
 		if err != nil {
 			return false, fmt.Errorf("invalid profile name: %w", err)
 		}
@@ -623,6 +686,26 @@ func (config *Config) apply(input ConfigInput) (updated bool, err error) {
 			log.Infof("disabling SSH server")
 		}
 		config.ServerSSHAllowed = input.ServerSSHAllowed
+		updated = true
+	}
+
+	if input.ServerVNCAllowed != nil && *input.ServerVNCAllowed != *config.ServerVNCAllowed {
+		if *input.ServerVNCAllowed {
+			log.Infof("enabling VNC server")
+		} else {
+			log.Infof("disabling VNC server")
+		}
+		config.ServerVNCAllowed = input.ServerVNCAllowed
+		updated = true
+	}
+
+	if input.DisableVNCApproval != nil && *input.DisableVNCApproval != *config.DisableVNCApproval {
+		if *input.DisableVNCApproval {
+			log.Infof("disabling VNC connection approval prompt")
+		} else {
+			log.Infof("enabling VNC connection approval prompt")
+		}
+		config.DisableVNCApproval = input.DisableVNCApproval
 		updated = true
 	}
 
@@ -833,6 +916,13 @@ func (config *Config) apply(input ConfigInput) (updated bool, err error) {
 		updated = true
 	}
 
+	if input.Owner != nil {
+		ownerString := ipcauth.OwnerPrincipalForIdentity(*input.Owner)
+		config.Owners = append([]string{}, ownerString)
+		log.Infof("setting '%s' as owner for profile %s", ownerString, config.Name)
+		updated = true
+	}
+
 	// Initialise the MDM overlay to "no enforcement" so Config.Policy()
 	// never returns a stale or nil policy on a freshly applied Config.
 	// Lifecycle owners that want to enforce a real MDM policy invoke
@@ -906,6 +996,8 @@ func (config *Config) applyMDMPolicy(policy *mdm.Policy) {
 
 	applyBool(mdm.KeyAllowServerSSH, func(v bool) { bv := v; config.ServerSSHAllowed = &bv })
 	applyBool(mdm.KeyRemoteJobsAllowed, func(v bool) { bv := v; config.RemoteJobsAllowed = &bv })
+	applyBool(mdm.KeyAllowServerVNC, func(v bool) { bv := v; config.ServerVNCAllowed = &bv })
+	applyBool(mdm.KeyDisableVNCApproval, func(v bool) { bv := v; config.DisableVNCApproval = &bv })
 	applyBool(mdm.KeyDisableClientRoutes, func(v bool) { config.DisableClientRoutes = v })
 	applyBool(mdm.KeyDisableServerRoutes, func(v bool) { config.DisableServerRoutes = v })
 	applyBool(mdm.KeyBlockInbound, func(v bool) { config.BlockInbound = v })
@@ -940,6 +1032,32 @@ func (config *Config) applyMDMPolicy(policy *mdm.Policy) {
 		logApplied(mdm.KeyLazyConnection, state)
 	}
 
+	config.applyMDMExtraIFaceBlackList(policy)
+}
+
+// applyMDMExtraIFaceBlackList appends the MDM interface prefixes missing from
+// the resolved blacklist. It runs after every write of the profile file, so the
+// MDM entries stay in memory only and vanish once the policy drops them.
+func (config *Config) applyMDMExtraIFaceBlackList(policy *mdm.Policy) {
+	if !policy.HasKey(mdm.KeyExtraIFaceBlackList) {
+		return
+	}
+
+	values, ok := policy.GetStringSlice(mdm.KeyExtraIFaceBlackList)
+	if !ok {
+		log.Warnf("MDM %s is not a list of interface names; ignoring it", mdm.KeyExtraIFaceBlackList)
+		return
+	}
+
+	entries := mdm.SplitList(values)
+	added := util.SliceDiff(entries, config.IFaceBlackList)
+	// Clip so the append never writes into a backing array shared with the
+	// slice the policy was applied to.
+	config.IFaceBlackList = append(slices.Clip(config.IFaceBlackList), added...)
+
+	log.Infof("MDM override %s = [ %s ] (added [ %s ])",
+		mdm.KeyExtraIFaceBlackList, strings.Join(entries, " "), strings.Join(added, " "))
+	log.Debugf("interface blacklist with MDM entries: [ %s ]", strings.Join(config.IFaceBlackList, " "))
 }
 
 // ValidateBundleUploadURL sanity-checks a debug-bundle upload URL. An empty
@@ -1056,6 +1174,14 @@ func generateKey() string {
 		panic(err)
 	}
 	return key.String()
+}
+
+func generateAuthKey() (string, error) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(priv.Seed()), nil
 }
 
 // don't overwrite pre-shared key if we receive asterisks from UI
